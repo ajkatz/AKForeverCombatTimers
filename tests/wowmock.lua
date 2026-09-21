@@ -10,7 +10,7 @@
 local Mock = {}
 
 local REAL_PRINT = print
-local ADDON = "ForeverCombatTimers"
+local ADDON = "AKForeverCombatTimers"
 
 local WIDGET_METHODS = {
     "SetSize", "SetWidth", "SetHeight", "GetWidth", "GetHeight", "SetPoint", "ClearAllPoints", "SetAllPoints",
@@ -373,8 +373,8 @@ function Mock.install(options)
     G.GetBuildInfo = function() return "1.60.1", "69893", "Sep 17 2026", 16001 end
     G.UISpecialFrames = {}
     G.SlashCmdList = {}
-    G.ForeverCombatTimersDB = options.db
-    G.ForeverCombatTimers_SavedStateBridge = options.bridge
+    G.AKForeverCombatTimersDB = options.db
+    G.AKForeverCombatTimers_SavedStateBridge = options.bridge
 
     G.Enum = { PlayerSwingType = { MainHand = 0, OffHand = 1, Ranged = 2 } }
 
@@ -553,7 +553,7 @@ function Mock.install(options)
         -- MEASURED on the 1.60.1 client: plain out of combat, an ERROR in a fight
         GetUnitAuraInstanceIDs = function()
             if state.inCombat and not state.aurasOpenInCombat then
-                error("GetUnitAuraInstanceIDs(): Auras cannot be accessed when secret while tainted by 'ForeverCombatTimers'")
+                error("GetUnitAuraInstanceIDs(): Auras cannot be accessed when secret while tainted by 'AKForeverCombatTimers'")
             end
             local ids = {}
             for _, aura in pairs(state.auras) do

@@ -1,4 +1,4 @@
--- ForeverCombatTimers scenario tests. Run from the repo root:
+-- AKForeverCombatTimers scenario tests. Run from the repo root:
 --     lua tests/run.lua
 -- Every scenario loads a fresh copy of the addon into the mock client, and fails
 -- if the addon raised ANY Lua error along the way (caught or not).
@@ -82,7 +82,7 @@ local function boar(state, victim)
     Mock.fire("PLAYER_TARGET_CHANGED")
 end
 
-Mock.realPrint("ForeverCombatTimers tests")
+Mock.realPrint("AKForeverCombatTimers tests")
 
 -- Your own swings ---------------------------------------------------------------
 scenario("PLAYER_SWING drives the bar: fills across the swing, then goes idle", function()
@@ -186,51 +186,51 @@ scenario("each bar: 'when used' (+ seconds after), 'always' or 'never' - locking
     local ns = start()
     local bars = ns.Bars.bars
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), true, "unlocked: the block is up for its drag tab ...")
+    equal(AKForeverCombatTimersFrame:IsShown(), true, "unlocked: the block is up for its drag tab ...")
     equal(bars.MH:IsShown(), false, "... but an idle 'when used' bar is not")
-    SlashCmdList.FOREVERCOMBATTIMERS("lock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), false, "locked and nothing in use: nothing on screen")
+    equal(AKForeverCombatTimersFrame:IsShown(), false, "locked and nothing in use: nothing on screen")
     Mock.setCombat(true)
     ns.Bars:Update()
     equal(bars.MH:IsShown(), false, "being in combat is not 'use' (a caster does not want an idle swing bar)")
 
     Mock.swing(2.6, MH)
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), true); equal(bars.MH:IsShown(), true, "swinging")
+    equal(AKForeverCombatTimersFrame:IsShown(), true); equal(bars.MH:IsShown(), true, "swinging")
     run(ns, 2.6 + 2.8)
     equal(bars.MH:IsShown(), true, "lingers 3 seconds after the swing")
     run(ns, 0.4)
     equal(bars.MH:IsShown(), false, "and goes")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("bar mh used 8")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar mh used 8")
     Mock.swing(2.6, MH)
     run(ns, 2.6 + 7)
     equal(bars.MH:IsShown(), true, "'/fct bar mh used 8'")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("bar mh always")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar mh always")
     Mock.advance(60)
     ns.Bars:Update()
     equal(bars.MH:IsShown(), true, "always")
-    SlashCmdList.FOREVERCOMBATTIMERS("bar mh never")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar mh never")
     ns.Bars:Update()
     equal(bars.MH:IsShown(), false); equal(bars.MH.slotted, false, "never: no row either")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("show always") -- the old switch still works: everything that is not 'never'
+    SlashCmdList.AKFOREVERCOMBATTIMERS("show always") -- the old switch still works: everything that is not 'never'
     ns.Bars:Update()
     equal(bars.ENEMY:IsShown(), true); equal(bars.CAST:IsShown(), true); equal(bars.MH:IsShown(), false)
     equal(bars.CAST.label:GetText(), "Your cast", "an idle 'always' cast bar carries its own name")
-    SlashCmdList.FOREVERCOMBATTIMERS("test")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("test")
     ns.Bars:Update()
     equal(ns.Bars.shownBars, ns.Bars.slots, "test mode moves every bar that has a row")
     for _, command in ipairs({ "bar", "bar reset", "fade", "snap", "anchor", "order", "config", "config" }) do
-        SlashCmdList.FOREVERCOMBATTIMERS(command)
+        SlashCmdList.AKFOREVERCOMBATTIMERS(command)
     end
 end)
 
 scenario("fading: bars ease in and out instead of popping; '/fct fade off' makes them pop", function()
     local ns = start({ fade = true })
-    SlashCmdList.FOREVERCOMBATTIMERS("lock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
     local bar = ns.Bars.bars.MH
     ns.Bars:Update()
     Mock.swing(2.6, MH)
@@ -246,7 +246,7 @@ scenario("fading: bars ease in and out instead of popping; '/fct fade off' makes
     near(bar:GetAlpha(), 0.5, 0.08, "half way out")
     run(ns, 0.5)
     equal(bar:IsShown(), false)
-    SlashCmdList.FOREVERCOMBATTIMERS("fade off")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("fade off")
     Mock.swing(2.6, MH)
     ns.Bars:Update()
     equal(bar:GetAlpha(), 1, "pops")
@@ -254,7 +254,7 @@ end)
 
 scenario("order, sizes and alignment: bars are rearranged within their half, each with its own width and height", function()
     local ns = start(nil, function(s) s.attackSpeed.player = { 2.6, 1.8, nil } end)
-    local bars, block = ns.Bars.bars, ForeverCombatTimersFrame
+    local bars, block = ns.Bars.bars, AKForeverCombatTimersFrame
     ns.Bars:Update()
     local function y(bar) local _, _, _, _, offset = bar:GetPoint(1); return offset end
     equal(bars.MH:GetParent(), block.lower); equal(bars.TCAST:GetParent(), block.upper)
@@ -263,24 +263,24 @@ scenario("order, sizes and alignment: bars are rearranged within their half, eac
     equal(y(bars.ENEMY), 0, "the enemy's last bar sits on the seam")
     check(y(bars.TCAST) > y(bars.ENEMY), "the enemy's grow UP")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("bar cast up")
-    SlashCmdList.FOREVERCOMBATTIMERS("bar cast up")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast up")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast up")
     ns.Bars:Update()
     check(y(bars.CAST) > y(bars.OH), "your cast moved above the off hand")
-    SlashCmdList.FOREVERCOMBATTIMERS("order enemy tcast cast mh oh")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("order enemy tcast cast mh oh")
     ns.Bars:Update()
     equal(y(bars.TCAST), 0, "target cast on the seam now, incoming hit above it")
     equal(y(bars.CAST), 0, "your cast first under the seam")
     equal(ns.BarSettings:Move("TCAST", 1), false, "a bar never crosses the seam")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("bar cast height 20")
-    SlashCmdList.FOREVERCOMBATTIMERS("bar cast width 300")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast height 20")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast width 300")
     ns.Bars:Update()
     equal(bars.CAST:GetHeight(), 20); equal(bars.CAST:GetWidth(), 300)
     equal(y(bars.MH), -(20 + 3), "the next row starts under the taller bar")
     equal(block:GetWidth(), 300 + 8, "the block is as wide as its widest bar")
     equal((bars.MH:GetPoint(1)), "TOP", "centred under it by default")
-    SlashCmdList.FOREVERCOMBATTIMERS("anchor left")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("anchor left")
     ns.Bars:Update()
     equal((bars.MH:GetPoint(1)), "TOPLEFT", "left edges lined up")
     equal((block:GetPoint(1)), "LEFT", "and the seam is pinned by its left end")
@@ -308,9 +308,9 @@ scenario("auto-watch: hostile target -> its victim; friendly target -> that frie
     Mock.fire("PLAYER_TARGET_CHANGED")
     equal(ns.Incoming.watched, "target")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("watch party2")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("watch party2")
     equal(ns.Incoming.watched, "party2", "explicit choice wins")
-    SlashCmdList.FOREVERCOMBATTIMERS("watch auto")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("watch auto")
     equal(ns.Incoming.watched, "target")
 
     state.identitySecret = true -- the client refuses to compare units
@@ -492,10 +492,10 @@ scenario("Blizzard's timer is switched off once, announced, and can be brought b
     end
     check(announced, "should say so in chat")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("blizzard show")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("blizzard show")
     equal(state.cvars.showSwingTimer, "1")
     Mock.setCombat(true)
-    SlashCmdList.FOREVERCOMBATTIMERS("blizzard hide")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("blizzard hide")
     equal(state.cvars.showSwingTimer, "1", "not touched in combat")
     Mock.setCombat(false)
     equal(state.cvars.showSwingTimer, "0", "settled after combat")
@@ -504,7 +504,7 @@ end)
 scenario("a player who had Blizzard's timer off keeps it off when turning ours off", function()
     local ns, state = start(nil, function(s) s.cvars.showSwingTimer = "0" end)
     equal(ns.db.blizzardTimerWasOn, nil)
-    SlashCmdList.FOREVERCOMBATTIMERS("blizzard show")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("blizzard show")
     equal(state.cvars.showSwingTimer, "0", "we only restore what we changed")
 end)
 
@@ -524,7 +524,7 @@ end
 
 scenario("cast bars: idle rows stay reserved, so nothing jumps when somebody starts casting", function()
     local ns = start()
-    SlashCmdList.FOREVERCOMBATTIMERS("lock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
     Mock.setCombat(true)
     Mock.swing(2.6, MH)
     ns.Bars:Update()
@@ -555,7 +555,7 @@ end)
 scenario("unlocked: a small tab to drag the block by; idle rows are click-through space with faint marks", function()
     local ns = start() -- the default: never locked (how the bars have been used so far)
     ns.Bars:Update()
-    local block, tab, bars = ForeverCombatTimersFrame, ForeverCombatTimersTab, ns.Bars.bars
+    local block, tab, bars = AKForeverCombatTimersFrame, AKForeverCombatTimersTab, ns.Bars.bars
     local hints = 0
     for _, line in ipairs(Mock.printed) do
         hints = hints + (line:find("/fct lock", 1, true) and 1 or 0)
@@ -585,20 +585,20 @@ scenario("unlocked: a small tab to drag the block by; idle rows are click-throug
     block:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 512 + 15, 200)
     tab:GetScript("OnDragStop")(tab)
     equal(select(4, block:GetPoint(1)), 512)
-    SlashCmdList.FOREVERCOMBATTIMERS("snap off")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("snap off")
     block:ClearAllPoints()
     block:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 512 + 15, 200)
     tab:GetScript("OnDragStop")(tab)
     equal(select(4, block:GetPoint(1)), 527, "snap off: stays where it was dropped")
-    SlashCmdList.FOREVERCOMBATTIMERS("center")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("center")
     equal(select(4, block:GetPoint(1)), 512)
-    SlashCmdList.FOREVERCOMBATTIMERS("anchor right") -- another anchor point: the block stays where it is
+    SlashCmdList.AKFOREVERCOMBATTIMERS("anchor right") -- another anchor point: the block stays where it is
     near(select(4, block:GetPoint(1)), 512 + block:GetWidth() / 2, 0.01)
 
     tab:GetScript("OnClick")(tab)
-    equal(ForeverCombatTimersConfig:IsShown(), true, "a click on the tab opens the settings")
+    equal(AKForeverCombatTimersConfig:IsShown(), true, "a click on the tab opens the settings")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("lock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
     ns.Bars:Update()
     equal(tab:IsShown(), false); equal(bars.MH.ghost:IsShown(), false, "locked: no tab, no marks - idle rows are just empty")
 end)
@@ -635,17 +635,17 @@ end)
 
 scenario("cast bars: your cast shows out of combat without dragging the idle swing bars along", function()
     local ns = start()
-    SlashCmdList.FOREVERCOMBATTIMERS("lock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), false, "locked, out of combat, nothing going on")
+    equal(AKForeverCombatTimersFrame:IsShown(), false, "locked, out of combat, nothing going on")
     Mock.cast("player", { name = "Hearthstone", seconds = 10 })
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), true)
+    equal(AKForeverCombatTimersFrame:IsShown(), true)
     equal(ns.Bars.bars.CAST:IsShown(), true)
     equal(ns.Bars.bars.MH:IsShown(), false, "no swing bars for a hearthstone")
     Mock.advance(10.5) -- no STOP event ever arrives: a timed cast still ends
     ns.Bars:Update()
-    equal(ForeverCombatTimersFrame:IsShown(), false)
+    equal(AKForeverCombatTimersFrame:IsShown(), false)
 end)
 
 scenario("cast bars: channels drain, pushback moves the end, a failed OTHER spell does not end the cast", function()
@@ -786,8 +786,8 @@ scenario("Blizzard's cast bars go only after ours has shown a cast: yours parked
     equal(PlayerCastingBarFrame:GetParent(), home, "mid-cast their bar is up: moving it now would run Blizzard's OnHide code from our call")
     Mock.castEnd("player")
     Mock.advance(6)
-    equal(PlayerCastingBarFrame:GetParent(), ForeverCombatTimersHidden, "between casts: parked on a frame that is never shown")
-    equal(ForeverCombatTimersHidden:IsShown(), false)
+    equal(PlayerCastingBarFrame:GetParent(), AKForeverCombatTimersHidden, "between casts: parked on a frame that is never shown")
+    equal(AKForeverCombatTimersHidden:IsShown(), false)
     equal(TargetFrameSpellBar:GetScale(), 1, "the target bar has not proven itself yet")
 
     Mock.setCombat(true) -- the usual moment for a first enemy cast
@@ -803,9 +803,9 @@ scenario("Blizzard's cast bars go only after ours has shown a cast: yours parked
     Mock.castEnd("player")
     PlayerCastingBarFrame:SetParent(home) -- should Blizzard ever re-adopt it
     Mock.advance(6)
-    equal(PlayerCastingBarFrame:GetParent(), ForeverCombatTimersHidden, "the watchdog")
+    equal(PlayerCastingBarFrame:GetParent(), AKForeverCombatTimersHidden, "the watchdog")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("casts blizzard show")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("casts blizzard show")
     equal(PlayerCastingBarFrame:GetParent(), home, "straight back home, no /reload")
     equal(TargetFrameSpellBar:GetScale(), 1, "and back to its own size")
     Mock.advance(6)
@@ -816,20 +816,20 @@ end)
 
 scenario("cast bar options: off means no row, no tracking, and Blizzard's bars are left alone", function()
     local ns = start({}, function() end)
-    SlashCmdList.FOREVERCOMBATTIMERS("casts off")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("casts off")
     Mock.cast("player", { name = "Healing Wave", seconds = 2 })
     ns.Bars:Update()
     equal(ns.Bars.bars.CAST:IsShown(), false)
     equal(ns.Bars.bars.CAST.slotted, false); equal(ns.Bars.bars.TCAST.slotted, false, "no rows for them")
     equal(ns.Casts.current.player, nil, "not even tracked")
     equal(PlayerCastingBarFrame:GetParent(), UIParentBottomManagedFrameContainer)
-    SlashCmdList.FOREVERCOMBATTIMERS("casts player on")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("casts player on")
     ns.Bars:Update()
     equal(ns.Bars.bars.CAST:IsShown(), true, "switched on mid-cast: picked up")
     equal(ns.Bars.bars.CAST.slotted, true); equal(ns.Bars.bars.TCAST.slotted, false)
-    SlashCmdList.FOREVERCOMBATTIMERS("casts blizzard show")
-    SlashCmdList.FOREVERCOMBATTIMERS("casts")
-    SlashCmdList.FOREVERCOMBATTIMERS("test")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("casts blizzard show")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("casts")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("test")
     ns.Bars:Update()
     equal(ns.Bars.bars.CAST.label:GetText(), "Your cast", "test mode shows a moving sample")
 end)
@@ -850,14 +850,14 @@ scenario("the buff bar: Slice and Dice out of combat - readable, with a countdow
     ns.Bars:Update()
     equal(bar:IsShown(), false, "cancelled: gone")
 
-    SlashCmdList.FOREVERCOMBATTIMERS("buff remove slice and dice")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("buff remove slice and dice")
     ns.Bars:Update()
     equal(bar.slotted, false, "nothing tracked: no row")
-    SlashCmdList.FOREVERCOMBATTIMERS("buff add Sprint")
-    SlashCmdList.FOREVERCOMBATTIMERS("buff")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("buff add Sprint")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("buff")
     ns.Bars:Update()
     equal(bar.slotted, true)
-    SlashCmdList.FOREVERCOMBATTIMERS("buff reset")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("buff reset")
 end)
 
 scenario("the buff bar in a FIGHT: auras are off limits there - the bar runs on the combo points spent, put through our curve by the client", function()
@@ -981,8 +981,8 @@ scenario("the buff bar: the report says what a fight allows - the aura list is a
     equal(ns.Buffs.probes[1].moment, "3s into a fight"); check(ns.Buffs.probes[1].listing:find("^error:"), ns.Buffs.probes[1].listing)
     Mock.comboPoints(2); Mock.advance(1)
     Mock.finisher(5171, "Slice and Dice")
-    SlashCmdList.FOREVERCOMBATTIMERS("diag")
-    local saved = ForeverCombatTimersDB.diag.buffs
+    SlashCmdList.AKFOREVERCOMBATTIMERS("diag")
+    local saved = AKForeverCombatTimersDB.diag.buffs
     equal(#saved.probes, 1); equal(saved.estimates.lastKind, "secret"); equal(saved.estimates.sent, 1)
     check(saved.estimates.curve:find("built", 1, true)); check(saved.estimates.snapshots >= 2)
     equal(saved.bar[1].found, "combo points (secret), when the cast was sent")
@@ -996,7 +996,7 @@ scenario("the buff bar: other classes have no row until they track something; a 
     Mock.buff(324, "Lightning Shield", 600)
     ns.Bars:Update()
     equal(ns.Bars.bars.BUFF:IsShown(), false, "not tracked: not our business")
-    SlashCmdList.FOREVERCOMBATTIMERS("buff add Lightning Shield")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("buff add Lightning Shield")
     Mock.fire("PLAYER_ENTERING_WORLD", false, true)
     Mock.advance(60)
     ns.Bars:Update()
@@ -1006,8 +1006,8 @@ end)
 
 scenario("settings window: every button does what the slash commands do", function()
     local ns = start()
-    SlashCmdList.FOREVERCOMBATTIMERS("config")
-    local panel = ForeverCombatTimersConfig
+    SlashCmdList.AKFOREVERCOMBATTIMERS("config")
+    local panel = AKForeverCombatTimersConfig
     equal(panel:IsShown(), true)
     local function click(widget) widget:GetScript("OnClick")(widget, "LeftButton") end
     click(panel.fade); equal(ns.BarSettings:GetBlock("fade"), true, "(the tests start with fading off)")
@@ -1027,7 +1027,7 @@ scenario("settings survive a session; the old position and switches are carried 
     local ns = start({ db = db, bridge = { version = 1, table = db } })
     equal(ns.db.loads, 4)
     equal(ns.savedStateSource, "bridge addon")
-    local point, _, relativePoint, x, y = ForeverCombatTimersFrame:GetPoint(1)
+    local point, _, relativePoint, x, y = AKForeverCombatTimersFrame:GetPoint(1)
     equal(point, "CENTER"); equal(relativePoint, "BOTTOMLEFT")
     near(x, 512 + 5, 0.01, "same place on the screen")
     near(y, 768 - 50 - 4 - 2 * 17 + 1.5, 0.01, "the seam is where the gap between 'incoming' and 'main hand' was")
@@ -1055,7 +1055,7 @@ scenario("diagnostics, slash commands and logout run; the report is SavedVariabl
     Mock.buff(5171, "Slice and Dice", 21)               -- in combat: its aura data is secret
     ns.Bars:Update()
     for _, command in ipairs({ "", "debug", "debug", "enemy", "enemy", "unlock", "lock", "reset", "show", "blizzard", "casts", "watch focus", "watch", "diag" }) do
-        SlashCmdList.FOREVERCOMBATTIMERS(command)
+        SlashCmdList.AKFOREVERCOMBATTIMERS(command)
     end
     Mock.fire("PLAYER_LOGOUT")
 
@@ -1070,8 +1070,8 @@ scenario("diagnostics, slash commands and logout run; the report is SavedVariabl
             check(kind == "string" or kind == "number" or kind == "boolean", path .. ": " .. kind .. " cannot be saved")
         end
     end
-    assertPlain(ForeverCombatTimersDB, "ForeverCombatTimersDB")
-    local diag = ForeverCombatTimersDB.diag
+    assertPlain(AKForeverCombatTimersDB, "AKForeverCombatTimersDB")
+    local diag = AKForeverCombatTimersDB.diag
     equal(diag.api["C_SwingTimer.EnableRangeCheck"], "function")
     equal(next(diag.blockedActions), nil, "no blocked actions")
     equal(diag.enemy.unitCombatEvents, 1)
@@ -1090,8 +1090,8 @@ scenario("the buff experiment: what an addon gets to see of Slice and Dice, out 
     Mock.buff(5171, "Slice and Dice", 21)                    -- in a fight
     Mock.buff(2983, "Sprint", 15, { neverSecret = true })    -- a spell Blizzard flagged "never secret"
     Mock.buff(1752, "Sinister Strike", 0)                    -- not a buff we watch
-    SlashCmdList.FOREVERCOMBATTIMERS("diag")
-    local samples = ForeverCombatTimersDB.diag.buffs.samples
+    SlashCmdList.AKFOREVERCOMBATTIMERS("diag")
+    local samples = AKForeverCombatTimersDB.diag.buffs.samples
     equal(#samples, 3)
     equal(samples[1].combat, false); equal(samples[1].lookup.returned, 1)
     equal(samples[1].lookup.aura.duration, 12, "readable out of combat")
@@ -1123,8 +1123,8 @@ end)
 
 scenario("renamed from ForeverSwingTimers: /fct is the command, /fst still works", function()
     start()
-    equal(SLASH_FOREVERCOMBATTIMERS2, "/fct"); equal(SLASH_FOREVERCOMBATTIMERS3, "/fst")
-    SlashCmdList.FOREVERCOMBATTIMERS("")
+    equal(SLASH_AKFOREVERCOMBATTIMERS2, "/fct"); equal(SLASH_AKFOREVERCOMBATTIMERS3, "/fst")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("")
     local listed = false
     for _, line in ipairs(Mock.printed) do
         listed = listed or line:find("/fct ", 1, true) ~= nil

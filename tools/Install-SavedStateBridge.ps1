@@ -1,19 +1,19 @@
 <#
 .SYNOPSIS
-    Installs (or removes) ForeverCombatTimers_SavedState, a companion addon that works around
+    Installs (or removes) AKForeverCombatTimers_SavedState, a companion addon that works around
     the WoW: Forever beta client writing SavedVariables on logout but never reading them back.
 
 .DESCRIPTION
-    A SavedVariables file is plain Lua ("ForeverCombatTimersDB = { ... }"). The client will not
+    A SavedVariables file is plain Lua ("AKForeverCombatTimersDB = { ... }"). The client will not
     load it as saved data, but runs it happily as addon code. This creates
 
-        Interface\AddOns\ForeverCombatTimers_SavedState\
-            ForeverCombatTimers_SavedState.toc
+        Interface\AddOns\AKForeverCombatTimers_SavedState\
+            AKForeverCombatTimers_SavedState.toc
             Before.lua
             SV\            <- directory junction to WTF\Account\<account>\SavedVariables
             After.lua
 
-    whose .toc lists SV\ForeverCombatTimers.lua. The main addon declares it as an OptionalDep,
+    whose .toc lists SV\AKForeverCombatTimers.lua. The main addon declares it as an OptionalDep,
     so it runs first. Same mechanism as WeaponBuffs' bridge, verified in the 1.60.1 beta.
 
     Not needed once Blizzard fixes the client: run with -Remove.
@@ -25,8 +25,8 @@
 [CmdletBinding()]
 param(
     [string]$ClientPath = 'C:\Program Files (x86)\World of Warcraft\_classic_beta_',
-    [string]$AddonName = 'ForeverCombatTimers',
-    [string]$GlobalName = 'ForeverCombatTimersDB',
+    [string]$AddonName = 'AKForeverCombatTimers',
+    [string]$GlobalName = 'AKForeverCombatTimersDB',
 
     # Folder name under WTF\Account. Default: the most recently used account.
     [string]$Account,

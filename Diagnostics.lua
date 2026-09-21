@@ -1,5 +1,5 @@
 -- Diagnostics: '/fct diag' snapshots what this client really does into
--- SavedVariables (ForeverCombatTimersDB.diag); a /reload writes it to disk.
+-- SavedVariables (AKForeverCombatTimersDB.diag); a /reload writes it to disk.
 --
 -- This is the experiment half of the addon. The enemy timer rests on assumptions
 -- nobody has documented - does UNIT_COMBAT stay readable in combat and inside

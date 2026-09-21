@@ -1,4 +1,4 @@
--- ForeverCombatTimers core: namespace, safe calls, event dispatch, message bus,
+-- AKForeverCombatTimers core: namespace, safe calls, event dispatch, message bus,
 -- saved variables, session log and slash commands.
 local ADDON_NAME, ns = ...
 
@@ -7,7 +7,7 @@ ns.name = ADDON_NAME
 local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 ns.version = (getMetadata and getMetadata(ADDON_NAME, "Version")) or "dev"
 
-local PRINT_PREFIX = "|cffd9b640ForeverCombatTimers|r: "
+local PRINT_PREFIX = "|cffd9b640AKForeverCombatTimers|r: "
 
 function ns:Print(...)
     local parts = {}
@@ -231,16 +231,16 @@ local function characterKey()
 end
 
 local function initDB()
-    local bridge = ForeverCombatTimers_SavedStateBridge
-    if type(ForeverCombatTimersDB) ~= "table" then
-        ForeverCombatTimersDB = {}
+    local bridge = AKForeverCombatTimers_SavedStateBridge
+    if type(AKForeverCombatTimersDB) ~= "table" then
+        AKForeverCombatTimersDB = {}
         ns.savedStateSource = "none (first run, or the client did not load it)"
-    elseif type(bridge) == "table" and bridge.table == ForeverCombatTimersDB then
+    elseif type(bridge) == "table" and bridge.table == AKForeverCombatTimersDB then
         ns.savedStateSource = "bridge addon"
     else
         ns.savedStateSource = "client"
     end
-    local db = ForeverCombatTimersDB
+    local db = AKForeverCombatTimersDB
 
     db.schema = db.schema or 1
     db.loads = (db.loads or 0) + 1
@@ -281,10 +281,10 @@ function ns:RegisterCommand(name, help, fn)
     commandOrder[#commandOrder + 1] = name
 end
 
-SLASH_FOREVERCOMBATTIMERS1 = "/forevercombattimers"
-SLASH_FOREVERCOMBATTIMERS2 = "/fct"
-SLASH_FOREVERCOMBATTIMERS3 = "/fst" -- the addon was called ForeverSwingTimers until v0.3.7: old habits keep working
-SlashCmdList["FOREVERCOMBATTIMERS"] = function(message)
+SLASH_AKFOREVERCOMBATTIMERS1 = "/akforevercombattimers"
+SLASH_AKFOREVERCOMBATTIMERS2 = "/fct"
+SLASH_AKFOREVERCOMBATTIMERS3 = "/fst" -- the addon was called ForeverSwingTimers until v0.3.7: old habits keep working
+SlashCmdList["AKFOREVERCOMBATTIMERS"] = function(message)
     local name, rest = string.match(message or "", "^%s*(%S*)%s*(.-)%s*$")
     local command = commands[string.lower(name or "")]
     if command then

@@ -1,5 +1,5 @@
 
-ForeverCombatTimersDB = {
+AKForeverCombatTimersDB = {
 ["diag"] = {
 ["savedStateSource"] = "bridge addon",
 ["log"] = {

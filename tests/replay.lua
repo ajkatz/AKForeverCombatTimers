@@ -1,15 +1,15 @@
 -- Replays REAL hit data saved by the game through the enemy-swing model and reports
 -- how well it predicted. Run from the repo root:
---     lua tests/replay.lua "<path to SavedVariables\ForeverCombatTimers.lua>"
+--     lua tests/replay.lua "<path to SavedVariables\AKForeverCombatTimers.lua>"
 -- The saved file holds the first ~120 UNIT_COMBAT events of a session
--- (ForeverCombatTimersDB.diag.enemy.rawSamples), timestamps included.
+-- (AKForeverCombatTimersDB.diag.enemy.rawSamples), timestamps included.
 package.path = "./tests/?.lua;" .. package.path
 local Mock = require("wowmock")
 
 local path = arg and arg[1]
 assert(path, "usage: lua tests/replay.lua <SavedVariables file>")
 dofile(path)
-local samples = ForeverCombatTimersDB.diag.enemy.rawSamples
+local samples = AKForeverCombatTimersDB.diag.enemy.rawSamples
 local prior = tonumber(arg[2]) -- optional: the attack speed the game showed out of combat
 
 local ns, state = Mock.install({ class = "ROGUE" })

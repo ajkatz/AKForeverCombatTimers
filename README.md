@@ -1,4 +1,4 @@
-# ForeverCombatTimers
+# AKForeverCombatTimers
 
 *Called ForeverSwingTimers until v0.3.7 - with the target's casts and your own in the same block,
 "swing timers" no longer covered it. `/fst` still works next to `/fct`.*
@@ -167,7 +167,7 @@ Swings.lua       your swings: PLAYER_SWING(duration, type) + range + attack spee
 Incoming.lua     enemy swings: watched-unit resolution, UNIT_COMBAT hit model, self-scoring
 UI/Bars.lua      the bars (plain frames only - nothing protected, nothing blocked in combat)
 Blizzard.lua     switches Blizzard's timer off/on through its CVar
-Diagnostics.lua  /fct diag -> ForeverCombatTimersDB.diag (measurements, errors, blocked actions)
+Diagnostics.lua  /fct diag -> AKForeverCombatTimersDB.diag (measurements, errors, blocked actions)
 ```
 
 **Your swings.** Forever ships `C_SwingTimer`: the `PLAYER_SWING` event carries the swing's
@@ -223,7 +223,7 @@ your own cast (for heal timing).
 ## The experiment
 
 Fight a few things, then `/fct diag`, `/reload`, and read
-`WTF/Account/<account>/SavedVariables/ForeverCombatTimers.lua` (`ForeverCombatTimersDB.diag`).
+`WTF/Account/<account>/SavedVariables/AKForeverCombatTimers.lua` (`AKForeverCombatTimersDB.diag`).
 
 1. `player.swings` / log `swing` entries: does `PLAYER_SWING` fire per swing, for each hand?
    What is the logged `drift` (how far off the previous timer was when the next swing came)?

@@ -665,7 +665,7 @@ local function applyLock()
 end
 
 local function create()
-    root = CreateFrame("Frame", "ForeverCombatTimersFrame", UIParent)
+    root = CreateFrame("Frame", "AKForeverCombatTimersFrame", UIParent)
     root:SetSize(220 + PAD * 2, GAP)
     root:SetMovable(true)
     root:SetClampedToScreen(true)
@@ -696,7 +696,7 @@ local function create()
     guide:Hide()
     root.guide = guide
 
-    local tab = CreateFrame("Button", "ForeverCombatTimersTab", root)
+    local tab = CreateFrame("Button", "AKForeverCombatTimersTab", root)
     tab:SetSize(52, 14)
     tab:SetPoint("RIGHT", root, "LEFT", -6, 0)
     tab.tint = tab:CreateTexture(nil, "BACKGROUND")

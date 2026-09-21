@@ -101,7 +101,7 @@ function Config:Refresh()
 end
 
 local function create()
-    panel = CreateFrame("Frame", "ForeverCombatTimersConfig", UIParent, "BackdropTemplate")
+    panel = CreateFrame("Frame", "AKForeverCombatTimersConfig", UIParent, "BackdropTemplate")
     panel:SetSize(WIDTH, 300)
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
     panel:SetFrameStrata("DIALOG")
@@ -115,7 +115,7 @@ local function create()
             tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } })
         panel:SetBackdropColor(0, 0, 0, 0.92)
     end
-    table.insert(UISpecialFrames, "ForeverCombatTimersConfig") -- Escape closes it
+    table.insert(UISpecialFrames, "AKForeverCombatTimersConfig") -- Escape closes it
 
     panel.title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     panel.title:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -PAD)

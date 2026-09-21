@@ -79,7 +79,7 @@ end)
 -- widget calls only - nothing is written onto Blizzard's frames, no event or script
 -- of theirs is touched - and '/fct casts blizzard show' puts both straight back:
 --
---   player  PARKED: re-parented to a frame that is never shown (how ForeverActionBars
+--   player  PARKED: re-parented to a frame that is never shown (how AKForeverActionBars
 --           hides Blizzard's action bars; proven on this client). Its code never asks
 --           for its parent. Only done while the bar is hidden, so that none of
 --           Blizzard's OnShow / OnHide code (the managed-frame container) runs on our
@@ -111,7 +111,7 @@ local CAST_BARS = {
 local CAST_WATCHDOG_SECONDS = 5
 local TINY_SCALE = 0.0001
 
-local hiddenParent = CreateFrame("Frame", "ForeverCombatTimersHidden", UIParent)
+local hiddenParent = CreateFrame("Frame", "AKForeverCombatTimersHidden", UIParent)
 hiddenParent:Hide()
 
 local originalParents = {} -- [frame] = the first parent we saw: home. Kept on OUR side.
