@@ -1041,7 +1041,532 @@ scenario("settings survive a session; the old position and switches are carried 
     ns.BarSettings:Move("CAST", -1)
     local again = start({ db = db })
     equal(again.BarSettings:Get("MH", "width"), 260)
-    equal(again.BarSettings:GetOrder()[#again.BarSettings:GetOrder()], "BUFF", "your cast moved up: the buff bar is last now")
+    equal(again.BarSettings:GetOrder()[#again.BarSettings:GetOrder()], "PLAINS", "your cast moved up: the Plainsrunning bar is last now")
+end)
+
+local PLAINSRUNNING = 20550
+
+-- the block fades its bars in and out; two frames of it is all it takes to have one on screen
+local function draw(ns)
+    for _ = 1, 2 do
+        Mock.advance(0.2)
+        ns.Bars:Update()
+    end
+end
+
+-- Really stopping: the speed goes to zero and stays there past the grace. Time passes, as it must.
+local function halt(ns)
+    Mock.setSpeed(0)
+    for _ = 1, 4 do
+        Mock.advance(0.15)
+        ns.Bars:Update()
+    end
+end
+
+-- a character running with the buff on, the bar already faded in and the tick clock just started
+local function running(stacks)
+    local ns = start()
+    Mock.setSpeed(7)
+    draw(ns)                                    -- (the first frame is where "moving" flips)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", stacks)
+    ns.Bars:Update()
+    return ns, ns.Bars.bars.PLAINS
+end
+
+scenario("Plainsrunning: the bar is the tick - it fills toward the next +1% while you keep moving", function()
+    local ns, bar = running(12)
+    check(bar and bar.active, "there it is")
+    near(bar.fraction, 0, 0.01, "the tick has just started")
+    equal(bar.time:GetText(), "12%  5.0", "how much you have, and how far the next 1% is")
+    equal(ns.Plains.state.moving, true)
+
+    Mock.advance(2.5)
+    ns.Bars:Update()
+    near(bar.fraction, 0.5, 0.01, "half way to the next tick")
+    equal(bar.time:GetText(), "12%  2.5")
+
+    Mock.advance(2.5)
+    ns.Bars:Update()
+    near(bar.fraction, 1, 0.01, "full: the tick is due")
+
+    -- and it lands: the count goes up and the bar starts again
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 13)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01, "a fresh tick")
+    equal(bar.time:GetText(), "13%  5.0")
+end)
+
+scenario("Plainsrunning: stand still and the bar counts DOWN toward the next -1%", function()
+    local ns, bar = running(12)
+    halt(ns) -- 0.45s of standing: past the grace
+    equal(ns.Plains.state.moving, false)
+    near(bar.fraction, 1 - 0.45 / 5, 0.02, "draining from full - and honest about the time already stood")
+
+    Mock.advance(2.05)
+    ns.Bars:Update()
+    near(bar.fraction, 0.5, 0.02, "half way to losing one")
+    equal(bar.time:GetText(), "12%  2.5")
+
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 11)
+    ns.Bars:Update()
+    near(bar.fraction, 1, 0.01, "it went; the next one starts full again")
+
+    -- nothing left to lose: the bar sits empty and says nothing about a tick
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 0)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01)
+    equal(bar.time:GetText(), "up")
+end)
+
+scenario("Plainsrunning: the gaining cycle runs on the clock, and a pause neither resets it nor stops it", function()
+    -- Measured on the live client: four gains that spanned a stop landed 4.96 to 5.05 seconds apart on
+    -- the CLOCK while holding only 1.0 to 4.2 seconds of moving inside them. The cycle does not care how
+    -- much of it you spent moving - so a pause must not send the bar back to nothing, and must not freeze
+    -- it either.
+    local ns, bar = running(12)
+    ns.Plains.ticks.down = { 1, 1, 1 }      -- this client's measured drain
+    ns.Plains.ticks.firstDown = { 1, 1, 1 }
+    Mock.advance(3)
+    ns.Bars:Update()
+    near(bar.fraction, 0.6, 0.02, "three seconds into a five second cycle")
+
+    halt(ns) -- 0.6s of standing: the bar is the drain's now
+    equal(ns.Plains.state.moving, false)
+    near(bar.fraction, 1 - 0.45 / 1, 0.05, "counting down, not up")
+
+    -- set off again: the drain still owed goes on showing until its moment passes
+    Mock.setSpeed(7)
+    ns.Bars:Update()
+    equal(ns.Plains.state.drainInFlight, true, "a percent may still go: keep saying so")
+    Mock.advance(0.6)
+    ns.Bars:Update()
+
+    -- and once it plainly is not coming, the gaining cycle is back - where the clock left it
+    equal(ns.Plains.state.drainInFlight, false)
+    near(bar.fraction, 4.2 / 5, 0.05, "three seconds, six tenths stood still, six tenths since")
+    check(bar.fraction > 0.5, "nowhere near back to nothing, which is what it used to do")
+
+    Mock.advance(0.8)
+    ns.Bars:Update()
+    near(bar.fraction, 1, 0.02, "five seconds after the last percent, however they were spent")
+end)
+
+scenario("Plainsrunning: a percent that arrives while you are already standing still still restarts the cycle", function()
+    -- one of the measured gains landed a second AFTER the player stopped: the cycle was still running
+    local ns, bar = running(12)
+    ns.Plains.ticks.down = { 1, 1, 1 }
+    ns.Plains.ticks.firstDown = { 1, 1, 1 }
+    Mock.advance(3)
+    ns.Bars:Update()
+    halt(ns)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 13) -- it lands anyway
+    near(ns.Plains.state.lastGainAt, GetTime(), 0.01, "the cycle counts from here now")
+
+    Mock.setSpeed(7)
+    Mock.advance(1.1) -- past the window in which a drain could still have landed
+    ns.Bars:Update()
+    near(bar.fraction, 1.1 / 5, 0.05, "so setting off again starts a fresh one, not a full bar")
+end)
+
+scenario("Plainsrunning: a percent going while you are already moving again is still shown coming", function()
+    -- Measured: a percent went 0.96s after the one before it while the player was moving and the bar was
+    -- showing a gain three quarters full. Setting off does not cancel the drain already on its way.
+    local ns, bar = running(12)
+    ns.Plains.ticks.down = { 1, 1, 1 }
+    ns.Plains.ticks.firstDown = { 1, 1, 1 }
+
+    halt(ns)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 11) -- the first one goes while you stand
+    equal(ns.Plains.state.lostSinceStop, true)
+
+    Mock.setSpeed(7) -- and off you go again, with another already counting down
+    Mock.advance(0.3)
+    ns.Bars:Update()
+    equal(ns.Plains.state.drainInFlight, true)
+    check(bar.fraction < 0.8, "the bar is still counting DOWN, not filling up: " .. tostring(bar.fraction))
+    equal(select(6, ns.Plains:GetProgress(GetTime()))[1], 0.85, "and it is still the draining colour")
+
+    -- it lands, exactly as the report said it does
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 10)
+    ns.Bars:Update()
+    check(true, "no surprise: the bar was showing it coming")
+end)
+
+scenario("Plainsrunning: the draining clock is its own, and starts fresh at every stop", function()
+    local ns, bar = running(12)
+    ns.Plains.ticks.down = { 4 }
+    ns.Plains.ticks.firstDown = { 4 }
+
+    halt(ns)
+    Mock.advance(2)
+    ns.Bars:Update()
+    near(ns.Plains.state.downBanked, 2.45, 0.02, "well into the wait")
+
+    -- setting off does not cancel the percent already on its way: it is still shown coming
+    Mock.setSpeed(7)
+    ns.Bars:Update()
+    equal(ns.Plains.state.drainInFlight, true, "2.45 of a four second drain stood: it may still land")
+    near(ns.Plains.state.downBanked, 2.45, 0.02, "so its clock is still running")
+
+    -- ... but not for ever: once its moment has passed the slate is clean
+    Mock.advance(1.6)
+    ns.Bars:Update()
+    equal(ns.Plains.state.drainInFlight, false)
+    near(ns.Plains.state.downBanked, 0, 0.01)
+
+    halt(ns)
+    near(ns.Plains.state.downBanked, 0.45, 0.02, "and standing again is a fresh wait, not a resumed one")
+    near(bar.fraction, 1 - 0.45 / 4, 0.02)
+end)
+
+scenario("Plainsrunning: a gain that spanned a stop is written down - does the game keep its place too?", function()
+    local ns, bar = running(12)
+    Mock.advance(3)
+    ns.Bars:Update()
+    halt(ns)             -- a pause part way through the tick
+    Mock.setSpeed(7)
+    ns.Bars:Update()
+    Mock.advance(2)
+    ns.Bars:Update()
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 13)
+
+    equal(#ns.Plains.ticks.up, 0, "an untested idea must not move the number the bar runs on")
+    local seen = ns.Plains.resumes[1]
+    check(seen, "but it IS written down")
+    near(seen.banked, 5, 0.2, "five seconds of actual moving")
+    check(seen.wall > 5.4, "and longer than that on the clock: the stop is the difference")
+    equal(seen.tick, 5)
+end)
+
+scenario("Plainsrunning: a drain counts down to the SOONEST seen, never the middle", function()
+    local ns, bar = running(12)
+    -- three drains measured: 1.0, 3.0, 3.0. The middle is 3 - and on the 1.0 seconds you would lose the
+    -- percent with two seconds still showing on the bar.
+    ns.Plains.ticks.down = { 1, 3, 3 }
+    ns.Plains.ticks.firstDown = { 1, 3, 3 }
+    near(ns.Plains:TickLength("down"), 1, 0.01, "the bar may be early; it may never overrun")
+    near(ns.Plains:TickLength("firstDown"), 1, 0.01)
+
+    halt(ns)
+    near(bar.fraction, 1 - 0.45 / 1, 0.03, "already more than a third gone")
+    Mock.advance(1)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01, "empty: any moment now")
+    equal(bar.time:GetText(), "12%  0.0")
+    Mock.advance(3)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01, "and it waits there rather than pretending a fresh tick began")
+end)
+
+scenario("Plainsrunning: at the cap the bar is simply full - nothing is coming", function()
+    local ns, bar = running(30)
+    Mock.advance(2)
+    ns.Bars:Update()
+    near(bar.fraction, 1, 0.01)
+    equal(bar.time:GetText(), "30%", "no countdown to a tick that cannot happen")
+end)
+
+scenario("Plainsrunning: how long a tick takes is measured on this client, not assumed", function()
+    local ns, bar = running(10)
+    equal(ns.Plains:TickLength("up"), 5, "the published 5 seconds, to begin with")
+    check(select(2, ns.Plains:TickLength("up")):find("published", 1, true))
+
+    -- three gains, four seconds apart: that is what this client does
+    for stacks = 11, 13 do
+        Mock.advance(4)
+        Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", stacks)
+        ns.Bars:Update()
+    end
+    near(ns.Plains:TickLength("up"), 4, 0.01, "measured")
+    equal(select(2, ns.Plains:TickLength("up")), "measured")
+    near(bar.fraction, 0, 0.01)
+    equal(bar.time:GetText(), "13%  4.0", "and the countdown uses it")
+
+    -- the drain has its own pace; until one is seen the gaining tick stands in
+    near(ns.Plains:TickLength("down"), 4, 0.01)
+    halt(ns)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 12) -- the first one to go: measured on its own
+    ns.Bars:Update()
+    near(ns.Plains.ticks.firstDown[1], 0.45, 0.02, "how long the game let us stand before it took one")
+    near(ns.Plains:TickLength("down"), 4, 0.01, "and that gap is NOT the drain's own pace")
+    Mock.advance(2)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 11)
+    ns.Bars:Update()
+    near(ns.Plains:TickLength("down"), 2, 0.01, "one percent to the next: that is the drain's pace")
+    check(select(2, ns.Plains:TickLength("down")):find("soonest", 1, true), "a drain never runs on the middle of what we saw")
+
+    -- a jump of several percent is a pause we did not see, not a tick
+    Mock.advance(9)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 3)
+    ns.Bars:Update()
+    near(ns.Plains:TickLength("down"), 2, 0.01, "still 2: an eight-point jump taught it nothing")
+end)
+
+scenario("Plainsrunning: the first percent takes longer to go than the ones after it, and the bar counts it down at ITS pace", function()
+    local ns, bar = running(12)
+    -- what this client does, measured earlier: 1 second between percents, 3 before the first one goes
+    ns.Plains.ticks.down = { 1, 1, 1 }
+    ns.Plains.ticks.firstDown = { 3.4, 3, 4.1 }
+    near(ns.Plains:TickLength("firstDown"), 3, 0.01, "the earliest one ever seen, not the middle")
+    check(select(2, ns.Plains:TickLength("firstDown")):find("soonest", 1, true))
+
+    halt(ns) -- 0.45s of standing
+    near(bar.fraction, 1 - 0.45 / 3, 0.02, "counting the FIRST percent down over three seconds, not one")
+    equal(bar.time:GetText(), "12%  2.6")
+
+    -- it empties, and the percent has still not gone: it HOLDS there rather than starting over
+    Mock.advance(3)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01, "empty: any moment now")
+    equal(bar.time:GetText(), "12%  0.0")
+    Mock.advance(2)
+    ns.Bars:Update()
+    near(bar.fraction, 0, 0.01, "still empty - it never pretends a fresh tick began")
+
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 11) -- there it goes
+    ns.Bars:Update()
+    equal(ns.Plains.state.lostSinceStop, true)
+    near(bar.fraction, 1, 0.02, "and now the steady drain: a fresh, full second")
+    equal(bar.time:GetText(), "11%  1.0")
+    Mock.advance(0.5)
+    ns.Bars:Update()
+    near(bar.fraction, 0.5, 0.02)
+
+    -- set off again: a percent may still be on its way, so the steady drain is still what is shown
+    Mock.setSpeed(7)
+    ns.Bars:Update()
+    equal(ns.Plains.state.drainInFlight, true)
+    equal(ns.Plains.state.lostSinceStop, true, "still the steady drain until that one lands or does not")
+
+    -- and once you have stopped again, the long first wait is back
+    halt(ns)
+    equal(ns.Plains.state.lostSinceStop, false)
+    near(bar.fraction, 1 - 0.45 / 3, 0.02, "the long one again")
+end)
+
+scenario("Plainsrunning: a wait many times the drain is a stop we mis-saw, and is thrown out", function()
+    local ns = running(12)
+    ns.Plains.ticks.down = { 1, 1 }
+    ns.Plains.ticks.firstDown = { 17.6, 1.7, 2.1 }
+    near(ns.Plains:TickLength("firstDown"), 1.7, 0.01, "17.6 seconds is not the game being slow")
+end)
+
+scenario("Plainsrunning: every stack change is written down for the report", function()
+    local ns = running(12)
+    Mock.advance(5)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 13)
+    halt(ns)
+    Mock.advance(1.5)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 12)
+    local changes = ns.Plains.changes
+    equal(#changes, 2)
+    equal(changes[1].from, 12); equal(changes[1].to, 13); equal(changes[1].moving, true)
+    equal(changes[2].to, 12); equal(changes[2].moving, false)
+    near(changes[2].sinceStop, 1.95, 0.05, "how long after stopping the first one went")
+end)
+
+scenario("Plainsrunning: each tick records where the bar WAS, and how much of its clock was strafe dips", function()
+    local ns, bar = running(12)
+    -- run five seconds, but strafe twice on the way: the speed dips without you ever stopping
+    Mock.advance(2)
+    ns.Bars:Update()
+    for _ = 1, 2 do
+        Mock.setSpeed(0)
+        Mock.advance(0.2)  -- under the grace: a strafe, not a stop
+        ns.Bars:Update()
+        Mock.setSpeed(7)
+        Mock.advance(0.2)
+        ns.Bars:Update()
+    end
+    equal(ns.Plains.state.dipsSince, 2, "two dips since the last change")
+    check(ns.Plains.state.dipTimeSince > 0.3, "and the time they handed to the gaining clock is counted")
+
+    Mock.advance(2.2)
+    ns.Bars:Update()
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 13)
+    local landed = ns.Plains.changes[#ns.Plains.changes]
+    equal(landed.dips, 2)
+    check(landed.dipTime > 0.3, "written down beside the tick it may have thrown off")
+    check(landed.bar ~= nil, "and where the bar was when it landed: full means our clock ran fast")
+    equal(ns.Plains.state.dipsSince, 0, "the count starts again at every change")
+end)
+
+scenario("Plainsrunning: with no first loss timed yet, the steady drain stands in for it", function()
+    local ns, bar = running(12)
+    ns.Plains.ticks.down = { 2, 2 }
+    equal(select(2, ns.Plains:TickLength("firstDown")), "the steady drain, until a first loss has been timed")
+    near(ns.Plains:TickLength("firstDown"), 2, 0.01)
+    halt(ns)
+    near(bar.fraction, 1 - 0.45 / 2, 0.02)
+end)
+
+scenario("Plainsrunning: jumping on the spot is not standing still - the buff builds and the bar keeps filling", function()
+    local ns, bar = running(12)
+    Mock.advance(2)
+    ns.Bars:Update()
+    near(bar.fraction, 0.4, 0.02)
+
+    -- a jump from a standstill: no ground speed at all for a whole second
+    Mock.setSpeed(0)
+    Mock.setFalling(true)
+    for _ = 1, 5 do
+        Mock.advance(0.2)
+        ns.Bars:Update()
+    end
+    equal(ns.Plains.state.moving, true, "off the ground is moving, whatever the speed says")
+    equal(ns.Plains.state.jumps, 1)
+    near(bar.fraction, 0.6, 0.02, "and the tick kept counting up through the jump")
+
+    -- landing, and now really standing: the grace has to pass before it counts
+    Mock.setFalling(false)
+    equal(ns.Plains.state.moving, true)
+    halt(ns)
+    equal(ns.Plains.state.moving, false, "landed and stood still: now it drains")
+    equal(ns.Plains.state.jumps, 1, "landing is not another jump")
+end)
+
+scenario("Plainsrunning: a client with no IsFalling just goes by the speed", function()
+    local ns = start()
+    _G.IsFalling = nil -- an older client without it
+    Mock.setSpeed(7)
+    draw(ns)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 12)
+    ns.Bars:Update()
+    equal(ns.Plains.state.moving, true)
+    equal(ns.Plains:Describe().hasIsFalling, false, "and the report says so")
+    halt(ns)
+    equal(ns.Plains.state.moving, false)
+end)
+
+scenario("Plainsrunning: strafing is not stopping - the tick carries on, and the bar never restarts", function()
+    local ns, bar = running(12)
+    Mock.advance(2)
+    ns.Bars:Update()
+    near(bar.fraction, 0.4, 0.02, "two of the five seconds")
+
+    -- a change of direction: the client reports zero speed for two frames
+    Mock.strafe(ns, 2)
+    equal(ns.Plains.state.moving, true, "still moving, as far as the game is concerned")
+    equal(ns.Plains.state.dipsIgnored, 1)
+    near(bar.fraction, 0.41, 0.02, "the tick carried on - it did not start over")
+
+    Mock.advance(2.9)
+    ns.Bars:Update()
+    near(bar.fraction, 1, 0.02, "and it still comes due on time")
+
+    -- several strafes in a row are still not a stop
+    for _ = 1, 4 do
+        Mock.strafe(ns, 3)
+    end
+    equal(ns.Plains.state.moving, true)
+    equal(ns.Plains.state.dipsIgnored, 5)
+end)
+
+scenario("Plainsrunning: the first idle moments hold the bar still - the gaining tick must not seem to carry on", function()
+    local ns, bar = running(12)
+    Mock.advance(2)
+    ns.Bars:Update()
+    local held = bar.fraction
+    near(held, 0.4, 0.02)
+
+    -- you stopped, but it could still be a strafe: nothing moves until we know
+    Mock.setSpeed(0)
+    Mock.advance(0.15)
+    ns.Bars:Update()
+    near(bar.fraction, held, 0.001, "held exactly where it was")
+    equal(bar.time:GetText(), "12%  3.0", "and so is the text")
+    Mock.advance(0.15)
+    ns.Bars:Update()
+    near(bar.fraction, held, 0.001, "still held")
+    equal(ns.Plains.state.moving, true)
+
+    -- past the grace it is a stop, and the drain clock counts from when the speed really went
+    Mock.advance(0.25)
+    ns.Bars:Update()
+    equal(ns.Plains.state.moving, false)
+    near(bar.fraction, 1 - 0.40 / 5, 0.02, "counting down, from the moment you actually stopped")
+end)
+
+scenario("Plainsrunning in a fight: the client says nothing, so we keep the count ourselves", function()
+    local ns, bar = running(25)
+    equal(bar.time:GetText(), "25%  5.0")
+
+    Mock.setCombat(true)
+    equal(ns.Plains.state.estimate, 25, "the fight starts from what we last knew")
+    Mock.advance(1)
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "25% ~  4.0", "'~': our own count, and a sound one - nothing has hit us")
+
+    -- the gaining tick comes round: nothing told us, so we count it ourselves
+    Mock.advance(4)
+    ns.Bars:Update()
+    equal(ns.Plains.state.estimate, 26)
+    equal(bar.time:GetText(), "26% ~  5.0", "and the next tick starts")
+    near(bar.fraction, 0, 0.02)
+
+    -- standing still in a fight drains it just the same
+    halt(ns)
+    Mock.advance(5)
+    ns.Bars:Update()
+    equal(ns.Plains.state.estimate, 25, "one gone")
+    equal(ns.Plains.state.lostSinceStop, true)
+    equal(ns.Plains.state.moving, false)
+end)
+
+scenario("Plainsrunning in a fight: once something hits you the count is only a guess, and says so", function()
+    local ns, bar = running(25)
+    Mock.setCombat(true)
+    Mock.advance(1)
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "25% ~  4.0")
+
+    Mock.fireUnit("UNIT_COMBAT", "player", "player", "WOUND", "", 40, 1)
+    equal(ns.Plains.state.hits, 1)
+    ns.Bars:Update()
+    check(bar.time:GetText():find("?", 1, true), "a hit takes some of the buff, and nobody knows how much")
+    check(not bar.time:GetText():find("~", 1, true))
+end)
+
+scenario("Plainsrunning: when the fight ends the truth is read back and kept beside our guess", function()
+    local ns, bar = running(25)
+    Mock.setCombat(true)
+    Mock.advance(5)
+    ns.Bars:Update()
+    equal(ns.Plains.state.estimate, 26, "we counted one on")
+    Mock.fireUnit("UNIT_COMBAT", "player", "player", "WOUND", "", 40, 1)
+
+    Mock.stackingBuff(PLAINSRUNNING, "Plainsrunning", 18) -- what it really was all along
+    Mock.setCombat(false)
+    ns.Bars:Update()
+    equal(ns.Plains.state.percent, 18, "out of the fight the client talks again")
+    equal(ns.Plains.state.estimate, nil)
+    local last = ns.Plains.combats[#ns.Plains.combats]
+    equal(last.started, 25); equal(last.hits, 1); equal(last.estimated, 26); equal(last.real, 18)
+    equal(last.out, 8, "eight percent unaccounted for, across one hit - that is the number to collect")
+    check(bar.time:GetText():find("18%%", 1, false))
+end)
+
+scenario("Plainsrunning: gone, not a tauren, or the buff is called something else here", function()
+    local ns, bar = running(12)
+    Mock.stackingBuff(PLAINSRUNNING, nil)
+    draw(ns)
+    check(not ns.Plains:InUse(), "gone")
+    check(not bar:IsShown(), "and the row faded out with it")
+
+    ns = start({ race = "Orc" })
+    check(not ns.Plains:Applies(), "no racial, no row")
+    check(not ns.Bars.HasRow("PLAINS"))
+
+    ns = start()
+    SlashCmdList.AKFOREVERCOMBATTIMERS("plains Plainstriding")
+    equal(ns.Plains:GetName(), "Plainstriding", "the name can be changed if a client calls it something else")
+    Mock.setSpeed(7)
+    draw(ns)
+    Mock.stackingBuff(PLAINSRUNNING, "Plainstriding", 30)
+    ns.Bars:Update()
+    equal(ns.Bars.bars.PLAINS.time:GetText(), "30%")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("plains")
+    check(#Mock.printed > 0)
 end)
 
 scenario("diagnostics, slash commands and logout run; the report is SavedVariables-safe", function()

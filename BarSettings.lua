@@ -19,21 +19,24 @@ local _, ns = ...
 local BarSettings = {}
 ns.BarSettings = BarSettings
 
-BarSettings.KEYS = { "TCAST", "ENEMY", "MH", "OH", "RG", "BUFF", "CAST" }
+BarSettings.KEYS = { "TCAST", "ENEMY", "MH", "OH", "RG", "BUFF", "PLAINS", "CAST" }
 BarSettings.LABELS = {
     TCAST = "Target cast", ENEMY = "Incoming hit", MH = "Main hand", OH = "Off hand", RG = "Ranged",
-    BUFF = "Buff", CAST = "Your cast",
+    BUFF = "Buff", PLAINS = "Plainsrunning", CAST = "Your cast",
 }
 BarSettings.MODES = { "always", "used", "never" }
 BarSettings.MODE_LABELS = { always = "Always", used = "When used", never = "Never" }
 BarSettings.ANCHORS = { "LEFT", "CENTER", "RIGHT" }
-BarSettings.GROUPS = { TCAST = "enemy", ENEMY = "enemy", MH = "own", OH = "own", RG = "own", BUFF = "own", CAST = "own" }
+BarSettings.GROUPS = { TCAST = "enemy", ENEMY = "enemy", MH = "own", OH = "own", RG = "own", BUFF = "own",
+    PLAINS = "own", CAST = "own" }
 
 local BAR_DEFAULTS = { mode = "used", after = 3, width = 220, height = 14 }
 local BAR_OVERRIDES = {
     TCAST = { after = 0 },
     CAST = { after = 0 },
     BUFF = { after = 0 },
+    PLAINS = { after = 0 }, -- Plainsrunning is a ramp, not a timer: there while the buff is, gone with it
+
     RG = { after = 10 }, -- a melee class that threw something: keep it up for a while
 }
 local BLOCK_DEFAULTS = { anchor = "CENTER", fade = true, snapCenter = true }
@@ -47,6 +50,7 @@ local ALIASES = {
     rg = "RG", ranged = "RG", range = "RG",
     cast = "CAST", mycast = "CAST", player = "CAST",
     buff = "BUFF", snd = "BUFF",
+    plains = "PLAINS", plainsrunning = "PLAINS", run = "PLAINS", speed = "PLAINS",
 }
 
 local isKey, isMode, isAnchor = {}, {}, {}

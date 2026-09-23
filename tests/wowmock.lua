@@ -343,6 +343,8 @@ function Mock.install(options)
         freshLogin = false,
         playerName = "Purrdee",
         playerClass = options.class or "WARRIOR",
+        playerRace = options.race or "Tauren",
+        speed = 0,
         attackSpeed = { player = { 2.6, nil, nil } }, -- [unit] = { mainHand, offHand, ranged } or Mock.SECRET
         units = {},  -- [token] = { id = "boar", name = "Boar", hostile = true }  (player is implicit)
         cvars = { showSwingTimer = "1" },
@@ -436,6 +438,9 @@ function Mock.install(options)
     end
     G.GetRealmName = function() return "Test Realm" end
     G.UnitClass = function() return "Player Class", state.playerClass end
+    G.UnitRace = function() return state.playerRace, state.playerRace end
+    G.GetUnitSpeed = function() return state.speed or 0 end
+    G.IsFalling = function() return state.falling and true or false end
     G.UnitIsUnit = function(a, b)
         local infoA, infoB = unitInfo(a), unitInfo(b)
         if state.identitySecret then
@@ -532,11 +537,11 @@ function Mock.install(options)
     local function auraView(aura)
         if not auraSecret(aura) then
             return { auraInstanceID = aura.auraInstanceID, spellId = aura.spellId, name = aura.name, duration = aura.duration,
-                expirationTime = aura.expirationTime, isFromPlayerOrPlayerPet = true }
+                expirationTime = aura.expirationTime, applications = aura.applications, isFromPlayerOrPlayerPet = true }
         end
         local S = Mock.SECRET
         return { auraInstanceID = aura.auraInstanceID, spellId = S, name = S, duration = S, expirationTime = S,
-            isFromPlayerOrPlayerPet = S }
+            applications = aura.applications and S or nil, isFromPlayerOrPlayerPet = S }
     end
     local function auraByInstance(id)
         for _, aura in pairs(state.auras) do
@@ -773,6 +778,43 @@ end
 
 -- The player casts a self buff: UNIT_SPELLCAST_SUCCEEDED (own casts are never secret), then UNIT_AURA.
 -- options: neverSecret, auraFirst (the aura event beats the cast event), secretEvent (UNIT_AURA's payload is secret)
+-- A stacking, duration-less buff - Plainsrunning and its like. `stacks` nil takes it away again.
+function Mock.stackingBuff(spellID, name, stacks)
+    local state = Mock.state
+    state.spellNames[spellID] = name
+    if stacks then
+        state.auras[spellID] = { auraInstanceID = 100 + spellID % 50, spellId = spellID, name = name,
+            duration = 0, expirationTime = 0, applications = stacks, neverSecret = true }
+    else
+        state.auras[spellID] = nil
+    end
+    Mock.fireUnit("UNIT_AURA", "player", "player", { isFullUpdate = true })
+end
+
+-- The player starts or stops moving (the bar asks for this once a frame; no event is involved).
+function Mock.setSpeed(speed)
+    Mock.state.speed = speed
+end
+
+-- Off the ground. A jump from a standstill reads zero speed the whole way up and down.
+function Mock.setFalling(falling)
+    Mock.state.falling = falling and true or nil
+end
+
+-- A strafe or a change of direction: the client reports zero speed for a frame or two, then carries on.
+-- (`frames` of them, a 60th of a second apart, the way the bar would see it.)
+function Mock.strafe(ns, frames)
+    local speed = Mock.state.speed
+    Mock.state.speed = 0
+    for _ = 1, (frames or 2) do
+        Mock.advance(1 / 60)
+        ns.Bars:Update()
+    end
+    Mock.state.speed = speed
+    Mock.advance(1 / 60)
+    ns.Bars:Update()
+end
+
 function Mock.buff(spellID, name, seconds, options)
     options = options or {}
     local state = Mock.state

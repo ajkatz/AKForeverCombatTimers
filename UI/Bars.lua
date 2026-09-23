@@ -36,6 +36,7 @@ local COLORS = {
     CAST = { 0.30, 0.58, 0.95 },
     TCAST = { 0.95, 0.52, 0.15 },
     BUFF = { 0.78, 0.45, 0.90 },
+    PLAINS = { 0.45, 0.80, 0.45 }, -- (Plainsrunning recolours it: green while it grows, red while it drains)
 }
 
 -- Bars whose content is a "timed thing with a name and an icon": where that thing comes from.
@@ -44,7 +45,7 @@ local SOURCES = {
     TCAST = function(now) return Casts:Get("target", now) end,
     BUFF = function(now) return ns.Buffs and ns.Buffs:Get(now) or nil end,
 }
-local TEST_CYCLES = { ENEMY = 2.0, MH = 2.6, OH = 1.7, RG = 3.0, CAST = 2.5, TCAST = 3.2, BUFF = 9.0 }
+local TEST_CYCLES = { ENEMY = 2.0, MH = 2.6, OH = 1.7, RG = 3.0, CAST = 2.5, TCAST = 3.2, BUFF = 9.0, PLAINS = 6.0 }
 
 local root, upper, lower -- the seam (what moves), and the two halves hanging off it
 local bars = {}          -- [key] = bar
@@ -163,12 +164,15 @@ local function applySize(bar, width, height)
     end
 end
 
-local function setProgress(bar, active, fraction, remaining)
+local function setProgress(bar, active, fraction, remaining, text, color)
     if active then
         bar.fill:SetWidth(math.max(1, bar.width * math.min(1, math.max(0, fraction))))
         bar.fill:Show()
         bar.spark:SetShown(fraction < 1)
-        bar.time:SetText(string.format("%.1f", remaining))
+        bar.time:SetText(text or string.format("%.1f", remaining))
+        if color then
+            bar.fill:SetColorTexture(color[1], color[2], color[3], 0.9)
+        end
     else
         bar.fill:Hide()
         bar.spark:Hide()
@@ -392,13 +396,17 @@ local function progressFor(key, now, testing)
     if key == "ENEMY" then
         local active, fraction, remaining, confidence = Incoming:GetProgress(now)
         return active, fraction, remaining, confidence < 0.4
+    elseif key == "PLAINS" then
+        return ns.Plains:GetProgress(now)
     end
     local active, fraction, remaining = Swings:GetProgress(key, now)
     return active, fraction, remaining, Swings.state[key].outOfRange
 end
 
 local function inUse(key, now)
-    if key == "ENEMY" then
+    if key == "PLAINS" then
+        return ns.Plains:InUse()
+    elseif key == "ENEMY" then
         return (Incoming:GetProgress(now)) and true or false
     elseif SOURCES[key] then
         return SOURCES[key](now) ~= nil
@@ -420,6 +428,8 @@ local function applies(key, now)
         return idle ~= nil and idle < math.max(10, Settings:Get(key, "after"))
     elseif key == "BUFF" then
         return ns.Buffs ~= nil and ns.Buffs:HasTracked()
+    elseif key == "PLAINS" then
+        return ns.Plains ~= nil and ns.Plains:Applies()
     end
     return true
 end
@@ -436,8 +446,20 @@ function Bars:GetBlockWidth()
     return self.blockWidth or (220 + PAD * 2)
 end
 
-function Bars:Layout(now)
+-- Seconds between two checks of whether the layout needs redoing. Measured on the test client: the
+-- CHECK - walking every bar, asking its settings, building a signature to compare - was two thirds of
+-- what an idle frame cost, sixty times a second, to answer a question whose answer changes when a bar
+-- appears or goes away. A sixth of a second late is not something an eye catches. Anything that really
+-- changes a setting clears layoutSignature, and that is taken as "now, please".
+local LAYOUT_INTERVAL = 0.15
+local lastLayoutAt
+
+function Bars:Layout(now, force)
     now = now or GetTime()
+    if not force and layoutSignature ~= nil and lastLayoutAt and (now - lastLayoutAt) < LAYOUT_INTERVAL then
+        return false
+    end
+    lastLayoutAt = now
     local order = Settings:GetOrder()
     local anchor = Settings:GetBlock("anchor")
     local parts = { anchor }
@@ -539,9 +561,9 @@ function Bars:Update()
                 shown = shown + 1
                 local dim = false
                 if bar.kind == "swing" then
-                    local active, fraction, remaining
-                    active, fraction, remaining, dim = progressFor(key, now, testing)
-                    setProgress(bar, active, fraction, remaining)
+                    local active, fraction, remaining, text, color
+                    active, fraction, remaining, dim, text, color = progressFor(key, now, testing)
+                    setProgress(bar, active, fraction, remaining, text, color)
                     if key == "ENEMY" then
                         local _, _, _, _, attackers = Incoming:GetProgress(now)
                         bar.label:SetText(watchedLabel(attackers))
@@ -766,6 +788,19 @@ ns:Listen("OPTION_CHANGED", function(_, key)
         applyLock()
     end
 end)
+
+-- The layout check is throttled (see LAYOUT_INTERVAL), so the things that really change WHICH bars
+-- belong on the block say so instead of being polled for: a weapon on or off, an aura coming or going,
+-- and walking into the world. Clearing the signature is the "look again now" flag.
+local function invalidate()
+    layoutSignature = nil
+end
+
+ns:On("PLAYER_EQUIPMENT_CHANGED", invalidate)
+ns:On("PLAYER_ENTERING_WORLD", invalidate)
+ns:OnPlayerUnit("UNIT_AURA", invalidate)
+ns:OnPlayerUnit("UNIT_ATTACK_SPEED", invalidate) -- an off hand put away changes the speeds, not the slot
+ns:On("PLAYER_SWING", invalidate) -- something thrown earns the ranged row a place at once
 
 ns:Listen("BARS_CHANGED", function()
     if root then

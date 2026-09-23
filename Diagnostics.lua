@@ -242,6 +242,77 @@ local function mean(values)
     return math.floor(sum / #values * 1000) / 1000
 end
 
+------------------------------------------------------------------------
+-- The aura probe ('/fct auras'). A stacking buff without a duration - Plainsrunning, say - does not fit
+-- the buff bar's model at all, and which fields it carries (applications? points? a duration of 0?) is
+-- not written down anywhere. So: ask the client, keep every answer as it came, and look at it afterwards.
+-- Read-only, and nothing is looked at before ns.IsSecret cleared it.
+------------------------------------------------------------------------
+local AURA_FIELDS = { "name", "applications", "charges", "duration", "expirationTime", "spellId", "icon",
+    "timeMod", "points", "sourceUnit", "isHelpful", "isHarmful", "auraInstanceID" }
+
+Diagnostics.auraProbe = { takenAt = "never asked" }
+
+function Diagnostics:ProbeAuras()
+    local probe = {
+        takenAt = date("%Y-%m-%d %H:%M:%S"),
+        inCombat = InCombatLockdown() and true or false,
+        auras = {},
+    }
+    local get = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    if type(get) ~= "function" then
+        probe.note = "this client has no C_UnitAuras.GetAuraDataByIndex"
+        Diagnostics.auraProbe = probe
+        return probe
+    end
+    for index = 1, 40 do
+        local ok, aura = pcall(get, "player", index, "HELPFUL")
+        if not ok then
+            probe.note = "index " .. index .. " raised: " .. tostring(aura)
+            break
+        end
+        if aura == nil then
+            break
+        end
+        if ns.IsSecret(aura) then
+            probe.auras[#probe.auras + 1] = { index = index, aura = "<secret>" }
+        else
+            local entry = { index = index }
+            for _, field in ipairs(AURA_FIELDS) do
+                local value = aura[field]
+                if value ~= nil then
+                    entry[field] = ns.IsSecret(value) and "<secret>" or sanitize(value)
+                end
+            end
+            probe.auras[#probe.auras + 1] = entry
+        end
+    end
+    Diagnostics.auraProbe = probe
+    return probe
+end
+
+ns:RegisterCommand("auras", "list the buffs on you right now with every field this client gives them (for '/fct diag')", function()
+    local probe = Diagnostics:ProbeAuras()
+    if probe.note then
+        ns:Print("auras: " .. probe.note)
+    end
+    if #probe.auras == 0 then
+        ns:Print("no readable buffs on you right now" .. (probe.inCombat and " (in a fight an addon may not touch them)" or "") .. ".")
+        return
+    end
+    ns:Print(#probe.auras .. " buff(s) on you" .. (probe.inCombat and " (in combat)" or "") .. ":")
+    for _, entry in ipairs(probe.auras) do
+        if entry.aura then
+            print(string.format("   %2d  |cff888888%s|r", entry.index, entry.aura))
+        else
+            print(string.format("   %2d  |cffffd100%s|r  stacks %s  duration %s  expires %s  id %s",
+                entry.index, tostring(entry.name), tostring(entry.applications or entry.charges or "-"),
+                tostring(entry.duration or "-"), tostring(entry.expirationTime or "-"), tostring(entry.spellId or "-")))
+        end
+    end
+    ns:Print("kept for the report - |cffffd100/fct diag|r then |cffffd100/reload|r writes it to disk.")
+end)
+
 function Diagnostics:Collect()
     local version, build, buildDate, tocVersion = GetBuildInfo()
     local incoming = ns.Incoming
@@ -254,8 +325,13 @@ function Diagnostics:Collect()
         inCombat = InCombatLockdown() and true or false,
         savedVariableLoads = ns.db.loads,
         savedStateSource = ns.savedStateSource,
+        -- what every addon has cost so far, when the profiler is on ("/fct cpu"): a chat line goes by,
+        -- a report can be read afterwards
+        addons = Diagnostics.AddonUsage and select(1, Diagnostics.AddonUsage()) or nil,
         unknownEvents = sanitize(ns.unknownEvents),
         errors = sanitize(ns.errors),
+        auraProbe = sanitize(Diagnostics.auraProbe),
+        plains = sanitize(ns.Plains and ns.Plains:Describe() or "no module"),
     }
 
     report.api = {}
@@ -348,6 +424,98 @@ ns:RegisterCommand("diag", "snapshot swing/enemy-timer data into SavedVariables 
         "| hits timed", enemy.hitsTimed, "| predictions scored", enemy.predictionsScored,
         "| mean error", enemy.meanAbsErrorSeconds and (enemy.meanAbsErrorSeconds .. "s") or "n/a")
     ns:Print("blocked actions:", #ns.blockedActions, "| now type |cffffd100/reload|r to write the report to disk")
+end)
+
+------------------------------------------------------------------------
+-- '/fct cpu': which addon is eating the frame?
+--
+-- The client can time every addon's Lua for you, but only when scriptProfile is on, and only from the
+-- next reload - it has to be in place before the code runs. So the command turns it on and says to
+-- reload; after that it reads the numbers back. Memory is always available and needs no reload.
+--
+-- CPU here is time spent in Lua since the profile began, in milliseconds. What matters is the SHAPE of
+-- the list - one addon far above the rest - not the absolute figures.
+------------------------------------------------------------------------
+local function profiling()
+    local get = _G.GetCVar or (C_CVar and C_CVar.GetCVar)
+    if type(get) ~= "function" then
+        return nil -- this client has no CVar interface for it
+    end
+    local ok, value = pcall(get, "scriptProfile")
+    if not ok or ns.IsSecret(value) then
+        return nil
+    end
+    return value == "1" or value == 1
+end
+
+local function addonList()
+    local count = (C_AddOns and C_AddOns.GetNumAddOns and C_AddOns.GetNumAddOns()) or (_G.GetNumAddOns and GetNumAddOns())
+    if type(count) ~= "number" then
+        return nil
+    end
+    local getInfo = (C_AddOns and C_AddOns.GetAddOnInfo) or _G.GetAddOnInfo
+    local cpuOf = _G.GetAddOnCPUUsage
+    local memoryOf = _G.GetAddOnMemoryUsage
+    if _G.UpdateAddOnCPUUsage then
+        pcall(_G.UpdateAddOnCPUUsage)
+    end
+    if _G.UpdateAddOnMemoryUsage then
+        pcall(_G.UpdateAddOnMemoryUsage)
+    end
+    local list, totalCPU, totalMemory = {}, 0, 0
+    for index = 1, count do
+        local okName, name = pcall(getInfo, index)
+        local cpu = cpuOf and select(2, pcall(cpuOf, index)) or nil
+        local memory = memoryOf and select(2, pcall(memoryOf, index)) or nil
+        if okName and type(name) == "string" and not ns.IsSecret(name) then
+            cpu = (type(cpu) == "number" and not ns.IsSecret(cpu)) and cpu or 0
+            memory = (type(memory) == "number" and not ns.IsSecret(memory)) and memory or 0
+            list[#list + 1] = { name = name, cpu = cpu, memory = memory }
+            totalCPU, totalMemory = totalCPU + cpu, totalMemory + memory
+        end
+    end
+    return list, totalCPU, totalMemory
+end
+
+Diagnostics.AddonUsage = addonList
+
+ns:RegisterCommand("cpu", "which addon is eating the frame: turns on the client's profiler (needs one /reload), then lists the worst offenders", function()
+    local on = profiling()
+    local list, totalCPU, totalMemory = addonList()
+    if not list then
+        ns:Print("this client will not list addons, so there is nothing to measure.")
+        return
+    end
+
+    table.sort(list, function(a, b)
+        if a.cpu ~= b.cpu then
+            return a.cpu > b.cpu
+        end
+        return a.memory > b.memory
+    end)
+
+    if on == false then
+        local set = _G.SetCVar or (C_CVar and C_CVar.SetCVar)
+        if type(set) == "function" and pcall(set, "scriptProfile", "1") then
+            ns:Print("the client's profiler was off. It is on now - |cffffd100/reload|r, play for a minute, then |cffffd100/fct cpu|r again.")
+        else
+            ns:Print("the client's profiler is off and would not turn on; only memory is shown below.")
+        end
+    elseif on == nil then
+        ns:Print("this client will not say whether the profiler is on; only memory may be meaningful below.")
+    end
+
+    ns:Print(string.format("addons loaded: %d | Lua time so far: %.0f ms | memory: %.1f MB", #list, totalCPU, totalMemory / 1024))
+    for index = 1, math.min(8, #list) do
+        local entry = list[index]
+        local share = totalCPU > 0 and (entry.cpu / totalCPU * 100) or 0
+        ns:Print(string.format("  %-28s %8.0f ms (%4.1f%%)  %6.1f MB", entry.name, entry.cpu, share, entry.memory / 1024))
+    end
+    if totalCPU <= 0 then
+        ns:Print("no Lua time recorded yet - that is what the reload above is for.")
+    else
+        ns:Print("one addon far above the rest is your answer; an even spread means the lag is not addon Lua.")
+    end
 end)
 
 -- Keep a report even if nobody asked for one: logout and /reload both write it.
