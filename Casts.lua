@@ -261,9 +261,11 @@ local function logInstant(_, unit, _, spellID)
     if unit ~= "player" or ns.IsSecret(spellID) or type(spellID) ~= "number" then
         return
     end
-    if Casts.current.player then
-        return -- a real cast is running: its own sample covers it
-    end
+    -- An instant that lands WHILE something is casting is the interesting one, not the one to throw
+    -- away: it is how you tell whether a shot goes off during an Aimed Shot, or whether the cast blocks
+    -- it. Which cast was running is recorded beside it.
+    local during = Casts.current.player
+    during = during and not ns.IsSecret(during.name) and type(during.name) == "string" and during.name or nil
     local name = C_Spell and C_Spell.GetSpellName and select(2, pcall(C_Spell.GetSpellName, spellID))
     if ns.IsSecret(name) or type(name) ~= "string" then
         name = nil
@@ -273,7 +275,8 @@ local function logInstant(_, unit, _, spellID)
         name = name, spellID = spellID,
         t = math.floor(GetTime() * 10) / 10,
         combat = InCombatLockdown() and true or false,
-        path = "instant - no cast to show",
+        duringCast = during,
+        path = during and ("fired DURING a cast of " .. during) or "instant - no cast to show",
     }
     while #Casts.samples > MAX_SAMPLES do
         table.remove(Casts.samples, 1)
@@ -380,4 +383,38 @@ ns:RegisterCommand("castlog", "the last few casts this addon saw: which spell, h
             s.path and s.path ~= "not shown yet" and ("  -> " .. s.path) or "  -> never shown"))
     end
     ns:Print("'instant' means the client fired no cast for it, so there is nothing a cast bar could show.")
+end)
+
+-- "Does this ability have a cast time on THIS client?" answered without rolling a character to try it.
+-- Classic's Slam casts for 1.5 seconds and Multi-Shot for half of one; on this client Multi-Shot came
+-- back instant, so the spell data is not Classic's. Rather than guess the rest, ask.
+ns:RegisterCommand("casttime", "does an ability cast on this client? '/fct casttime 1464' or '/fct casttime Slam'", function(rest)
+    local query = string.match(rest or "", "^%s*(.-)%s*$")
+    if query == "" then
+        ns:Print("usage: |cffffd100/fct casttime <spell id or name>|r  (an id always works; a name only for spells you know)")
+        return
+    end
+    local get = C_Spell and C_Spell.GetSpellInfo
+    if type(get) ~= "function" then
+        ns:Print("this client has no C_Spell.GetSpellInfo, so it will not say.")
+        return
+    end
+    local ok, info = pcall(get, tonumber(query) or query)
+    if not ok or type(info) ~= "table" or ns.IsSecret(info) then
+        ns:Print("the client says nothing about |cffffd100" .. query .. "|r. An id works where a name does not.")
+        return
+    end
+    local name = (not ns.IsSecret(info.name)) and info.name or query
+    local castTime = info.castTime
+    if ns.IsSecret(castTime) or type(castTime) ~= "number" then
+        ns:Print(tostring(name) .. ": the client will not say how long it casts.")
+        return
+    end
+    if castTime <= 0 then
+        ns:Print(string.format("|cffffd100%s|r is INSTANT on this client - it fires no cast, so no cast bar can show it. "
+            .. "A melee ability drives the main-hand row; a shot drives the ranged one.", tostring(name)))
+    else
+        ns:Print(string.format("|cffffd100%s|r casts for %.1fs here, so it belongs on the cast bar. "
+            .. "If it is not showing, |cffffd100/fct castlog|r says why.", tostring(name), castTime / 1000))
+    end
 end)

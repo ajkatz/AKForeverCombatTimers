@@ -1601,7 +1601,15 @@ scenario("diagnostics, slash commands and logout run; the report is SavedVariabl
     equal(next(diag.blockedActions), nil, "no blocked actions")
     equal(diag.enemy.unitCombatEvents, 1)
     equal(diag.player.swings.MH.count, 1)
-    equal(#diag.casts.samples, 2)
+    -- three now: an instant that lands DURING a cast is kept rather than dropped, because that is
+    -- how you tell whether a shot goes off mid-cast
+    equal(#diag.casts.samples, 3)
+    local during
+    for _, s in ipairs(diag.casts.samples) do
+        if s.duringCast then during = s end
+    end
+    check(during, "the instant that fired during a cast is recorded")
+    check(tostring(during.path):find("DURING", 1, true))
     equal(diag.casts.samples[1].secretName, true); equal(diag.casts.samples[1].path, "SetTimerDuration")
     equal(diag.casts.samples[2].secretTimes, false); equal(diag.casts.samples[2].path, "numbers")
     equal(diag.casts.proven.player, true)
