@@ -141,8 +141,10 @@ local function sample(unit, event, cast, count, payloadUnit, payloadSpell)
     local entry = {
         unit = unit, event = event, kind = cast.kind, returns = count,
         name = name, spellID = spellID,
-        seconds = cast.timesReadable and cast.endMS and cast.startMS
-            and math.floor((cast.endMS - cast.startMS) / 100) / 10 or nil,
+        -- `length` is how long the cast IS. (`seconds` on this table is already taken, and means
+        -- something else entirely: HOW the time left reaches the bar. ReportPath fills that in.)
+        length = cast.timesReadable and cast.endTime and cast.startTime
+            and math.floor((cast.endTime - cast.startTime) * 10) / 10 or nil,
         t = math.floor(GetTime() * 10) / 10,
         combat = InCombatLockdown() and true or false,
         secretName = ns.IsSecret(cast.name), secretTexture = ns.IsSecret(cast.texture),
@@ -177,7 +179,8 @@ local function refresh(unit, event, payloadUnit, payloadSpell)
         end
     end
     serial = serial + 1
-    local cast = { unit = unit, kind = kind, name = name, texture = texture, serial = serial, began = GetTime(),
+    local cast = { unit = unit, kind = kind, name = name, texture = texture, spellID = spellID,
+        serial = serial, began = GetTime(),
         owner = Casts, drains = kind == "channel", -- (UI/Bars.lua shows casts and buffs with the same code)
         fromItem = fromItem }
     if not ns.AnySecret(startMS, endMS) and type(startMS) == "number" and type(endMS) == "number" and endMS > startMS then
@@ -250,6 +253,35 @@ end
 ------------------------------------------------------------------------
 -- Events
 ------------------------------------------------------------------------
+-- An ability with no cast time fires no START at all - only SUCCEEDED. Without those in the log,
+-- "nothing here" means both "this ability is instant" and "this addon is broken", and the two cannot be
+-- told apart. They are recorded for the log ONLY: no bar is armed, nothing is tracked, and a cast that
+-- really is in flight is left to the code below.
+local function logInstant(_, unit, _, spellID)
+    if unit ~= "player" or ns.IsSecret(spellID) or type(spellID) ~= "number" then
+        return
+    end
+    if Casts.current.player then
+        return -- a real cast is running: its own sample covers it
+    end
+    local name = C_Spell and C_Spell.GetSpellName and select(2, pcall(C_Spell.GetSpellName, spellID))
+    if ns.IsSecret(name) or type(name) ~= "string" then
+        name = nil
+    end
+    Casts.samples[#Casts.samples + 1] = {
+        unit = "player", event = "UNIT_SPELLCAST_SUCCEEDED", kind = "instant",
+        name = name, spellID = spellID,
+        t = math.floor(GetTime() * 10) / 10,
+        combat = InCombatLockdown() and true or false,
+        path = "instant - no cast to show",
+    }
+    while #Casts.samples > MAX_SAMPLES do
+        table.remove(Casts.samples, 1)
+    end
+end
+
+ns:OnPlayerUnit("UNIT_SPELLCAST_SUCCEEDED", logInstant)
+
 local STARTS = { "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_UPDATE" }
 local ENDS = { "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }
 local FAILED = "UNIT_SPELLCAST_FAILED"
@@ -343,8 +375,9 @@ ns:RegisterCommand("castlog", "the last few casts this addon saw: which spell, h
         local s = samples[index]
         ns:Print(string.format("  %-7s %-26s %-18s %s%s", tostring(s.unit), tostring(s.event),
             s.name or (s.secretName and "<secret>") or "?",
-            s.seconds and (s.seconds .. "s") or (s.secretTimes and "times secret" or "instant"),
+            s.length and (s.length .. "s") or (s.kind == "instant" and "instant")
+                or (s.secretTimes and "times secret") or "no length",
             s.path and s.path ~= "not shown yet" and ("  -> " .. s.path) or "  -> never shown"))
     end
-    ns:Print("an ability with no cast time fires no cast event at all - there is nothing for the bar to show.")
+    ns:Print("'instant' means the client fired no cast for it, so there is nothing a cast bar could show.")
 end)
