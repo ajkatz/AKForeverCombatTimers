@@ -548,12 +548,17 @@ function Plains:GetProgress(now)
     return true, fraction, 0, false, text, draining and DRAINING or GAINING
 end
 
--- while Plainsrunning is up AND readable (the bar's "when used")
--- hidden in combat because the client will not show auras and the estimate drifts
+-- While Plainsrunning is up (the bar's "when used"), IN A FIGHT TOO.
+--
+-- This used to return false in combat, on the grounds that the client shows an addon no auras there and
+-- the estimate drifted. The drift was real and it was our fault: the gaining clock counted banked moving
+-- time, which ran as much as two seconds fast over a minute. On the wall clock it now tracks the real
+-- tick to within a few hundredths, so the estimate is worth showing - which is the whole point of
+-- keeping one, and a fight is when a movement-speed buff matters most.
+--
+-- It is never passed off as certain: GetProgress marks it "~" while nothing has hit us and "?" once
+-- something has, and PLAYER_REGEN_ENABLED writes what we counted against the truth (Plains.combats).
 function Plains:InUse()
-    if InCombatLockdown() then
-        return false
-    end
     return Plains:Current() ~= nil
 end
 

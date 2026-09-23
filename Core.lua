@@ -277,6 +277,14 @@ end
 local commands, commandOrder = {}, {}
 
 function ns:RegisterCommand(name, help, fn)
+    -- Registering a name twice replaced the first one without a word, and cost an afternoon: a new
+    -- "/fct casts" quietly took over the one that turns the cast bars off. Now it says so.
+    if commands[name] then
+        ns:Log("command_taken_twice", name)
+        if ns.Print then
+            ns:Print("|cffff6060two commands are called  .. tostring(name) .. |r - the later one wins. This is a bug.")
+        end
+    end
     commands[name] = { help = help, fn = fn }
     commandOrder[#commandOrder + 1] = name
 end

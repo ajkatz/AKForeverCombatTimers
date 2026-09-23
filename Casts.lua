@@ -128,12 +128,21 @@ ns:On("PLAYER_EQUIPMENT_CHANGED", function()
     itemIcons = nil
 end)
 
+-- The LAST few, not the first few. A report is read after somebody has played and noticed something
+-- missing, so the samples worth keeping are the recent ones; the old behaviour filled up at login and
+-- never recorded anything again.
+--
+-- And the spell's NAME, when the client will say it. Your own casts are never secret, so for the one
+-- question these samples exist to answer - "did my Multi-Shot fire a cast event at all?" - the name is
+-- the whole answer. Somebody else's may be secret, and then it is left out rather than looked at.
 local function sample(unit, event, cast, count, payloadUnit, payloadSpell)
-    if #Casts.samples >= MAX_SAMPLES then
-        return
-    end
+    local name = (not ns.IsSecret(cast.name) and type(cast.name) == "string") and cast.name or nil
+    local spellID = (not ns.IsSecret(cast.spellID) and type(cast.spellID) == "number") and cast.spellID or nil
     local entry = {
         unit = unit, event = event, kind = cast.kind, returns = count,
+        name = name, spellID = spellID,
+        seconds = cast.timesReadable and cast.endMS and cast.startMS
+            and math.floor((cast.endMS - cast.startMS) / 100) / 10 or nil,
         t = math.floor(GetTime() * 10) / 10,
         combat = InCombatLockdown() and true or false,
         secretName = ns.IsSecret(cast.name), secretTexture = ns.IsSecret(cast.texture),
@@ -144,6 +153,9 @@ local function sample(unit, event, cast, count, payloadUnit, payloadSpell)
     }
     cast.sample = entry
     Casts.samples[#Casts.samples + 1] = entry
+    while #Casts.samples > MAX_SAMPLES do
+        table.remove(Casts.samples, 1)
+    end
 end
 
 -- Look at the unit again and replace what we know about it.
@@ -319,4 +331,20 @@ ns:RegisterCommand("casts", "cast bars: 'on' / 'off' (both), 'player on|off', 't
     end
     ns:Print("cast bars - yours:", Settings.MODE_LABELS[Settings:GetMode("CAST")], "| target:", Settings.MODE_LABELS[Settings:GetMode("TCAST")],
         "| Blizzard's:", ns:GetOption("hideBlizzardCastBars") and "hidden once ours has shown a cast" or "left alone")
+end)
+
+ns:RegisterCommand("castlog", "the last few casts this addon saw: which spell, how long, and whether it made it onto the bar", function()
+    local samples = ns.Casts.samples
+    if #samples == 0 then
+        ns:Print("no casts seen yet. Cast something and ask again.")
+        return
+    end
+    for index = math.max(1, #samples - 9), #samples do
+        local s = samples[index]
+        ns:Print(string.format("  %-7s %-26s %-18s %s%s", tostring(s.unit), tostring(s.event),
+            s.name or (s.secretName and "<secret>") or "?",
+            s.seconds and (s.seconds .. "s") or (s.secretTimes and "times secret" or "instant"),
+            s.path and s.path ~= "not shown yet" and ("  -> " .. s.path) or "  -> never shown"))
+    end
+    ns:Print("an ability with no cast time fires no cast event at all - there is nothing for the bar to show.")
 end)
