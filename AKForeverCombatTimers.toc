@@ -1,8 +1,9 @@
 ## Interface: 16001
-## Version: 0.5.0
+## Version: @project-version@
 ## Title: AKForeverCombatTimers
 ## Notes: Combat timers for WoW: Forever in one block - the target's cast and the next enemy hit grow up from a seam, your main hand, off hand, ranged swings, buff timer, the Plainsrunning ramp and your own cast grow down from it. Every bar: always / when used / never, size, order.
 ## Author: Purrdee
+## X-License: MIT
 ## IconTexture: Interface\AddOns\AKForeverCombatTimers\icon
 ## SavedVariables: AKForeverCombatTimersDB
 ## OptionalDeps: AKForeverCombatTimers_SavedState

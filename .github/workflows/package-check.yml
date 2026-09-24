@@ -1,0 +1,35 @@
+# Builds the release zip exactly as a release would - and uploads it NOWHERE (-d): a dry run of the
+# packaging, so that the first real tag holds no surprises. The zip's contents are listed in the log and the
+# zip is kept as a workflow artifact for a few days.
+name: Package check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: BigWigsMods/packager@v2
+        with:
+          args: -d
+      - name: What players would get
+        run: |
+          ls -la .release
+          for zip in .release/*.zip; do
+            echo "== $zip"
+            unzip -l "$zip"
+            echo "== the TOC inside"
+            unzip -p "$zip" AKForeverCombatTimers/AKForeverCombatTimers.toc
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AKForeverCombatTimers-package-check
+          path: .release/*.zip
+          include-hidden-files: true # (.release is a dot folder)
+          retention-days: 7

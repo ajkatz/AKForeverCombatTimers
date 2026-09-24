@@ -1,0 +1,35 @@
+# A pushed tag (v0.2.0, v0.2.1-beta1 ...) is tested, packaged and uploaded to CurseForge, Wago and GitHub Releases.
+# Tags with "alpha" / "beta" in the name are uploaded as alpha / beta files.
+# Needs two repository secrets: CF_API_KEY (CurseForge API token) and WAGO_API_TOKEN (Wago developer token),
+# and the project ids in AKForeverCombatTimers.toc (## X-Curse-Project-ID, ## X-Wago-ID). A site without id or token is skipped.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Lua 5.4
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+      - name: Scenario tests
+        run: lua5.4 tests/run.lua
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # GitHub Release
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the packager reads tags and history
+      - uses: BigWigsMods/packager@v2

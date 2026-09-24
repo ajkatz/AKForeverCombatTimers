@@ -5,7 +5,7 @@ AKForeverCombatTimersDB = {
 ["log"] = {
 {
 ["d"] = {
-["character"] = "Purr Rogie - ClassicBetaPvE",
+["character"] = "Testing Rogue - TestRealm",
 ["version"] = "0.1.1",
 ["class"] = "ROGUE",
 ["savedState"] = "bridge addon",
@@ -3415,7 +3415,7 @@ AKForeverCombatTimersDB = {
 ["n"] = 0,
 },
 },
-["character"] = "Purr Rogie - ClassicBetaPvE",
+["character"] = "Testing Rogue - TestRealm",
 ["capturedAt"] = "2026-09-19 00:10:59",
 ["build"] = {
 ["date"] = "Sep 17 2026",
@@ -3479,7 +3479,7 @@ true,
 ["loads"] = 8,
 ["schema"] = 1,
 ["chars"] = {
-["Purrdee Bubson - ClassicBetaPvE"] = {
+["Testing Shaman - TestRealm"] = {
 ["options"] = {
 },
 ["position"] = {
@@ -3489,7 +3489,7 @@ true,
 ["relativePoint"] = "BOTTOM",
 },
 },
-["Purr Rogie - ClassicBetaPvE"] = {
+["Testing Rogue - TestRealm"] = {
 ["options"] = {
 },
 ["position"] = {
