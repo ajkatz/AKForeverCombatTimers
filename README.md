@@ -13,12 +13,14 @@ Swing timers and cast bars for **World of Warcraft: Forever** (Interface `16001`
   icon, name, seconds left. Blizzard's two cast bars are switched off once ours has proven it works.
 - **Planned: heal timing** - mark when to start a heal so it lands just after the hit.
 
-Status: **v0.4.1 (2026-09-20)** - renamed from ForeverSwingTimers on 2026-09-20. Confirmed in the game the same day:
+Status: **v0.5.0 (2026-09-25)** - the first public release. New in it, and not yet checked in the game: the DoT bars
+and the reactive windows (see their sections; Rupture and Rip lengths and the Overpower attribution are the parts to
+watch, and `/fct dot` says what the game has taught it). Confirmed in the game on 2026-09-20:
 *Slice and Dice* stays on the buff bar for its WHOLE duration in a fight (see *The buff bar*). Your own swing bars stand on a verified API and work in the game;
 the enemy bar (v0.2 model) replays a real session with a median error of 0.05 s. The cast bars are
 new and unproven in the game - see *Cast bars and secret values*.
 
-## The block (v0.3.5)
+## The block
 
 ```
       target cast        ^   the enemy's half grows UP from the seam
