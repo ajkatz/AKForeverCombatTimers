@@ -71,6 +71,7 @@ local observed = {}
 local serial = 0
 
 Dots.samples = {}         -- for /fct diag
+Dots.stats = { droppedDead = 0, droppedGone = 0 }
 local MAX_SAMPLES = 12
 
 local function now()
@@ -225,6 +226,51 @@ local function readAura(aura)
     return { name = name, total = duration, endTime = expires, texture = icon }
 end
 
+-- One answer from the client, or nil when the call failed, the function is missing, or the answer is a
+-- secret. (This addon has no shared Readable helper; the tooltip addon does, and this was first written
+-- as if they shared one.)
+local function readable(fn, ...)
+    if type(fn) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(fn, ...)
+    if not ok or ns.IsSecret(value) then
+        return nil
+    end
+    return value
+end
+
+-- A corpse stays targeted; its DoTs are over. UnitIsDeadOrGhost carries no secret flag in the API docs,
+-- and the read is guarded anyway: an unreadable answer is "not known to be dead".
+local function isDead(unit)
+    return readable(UnitIsDeadOrGhost, unit) == true
+end
+
+local function dropIfDead(unit)
+    if not isDead(unit) then
+        return false
+    end
+    local guid = guidOf(unit)
+    if guid and applied[guid] then
+        forget(guid)
+        Dots.stats.droppedDead = (Dots.stats.droppedDead or 0) + 1
+    end
+    return true
+end
+
+-- Can an EMPTY aura walk be believed? Out of a fight, yes. In one, only if the client itself says auras
+-- are not secret right now; otherwise a hidden aura would look exactly like a vanished one.
+local function aurasReadableNow()
+    if not InCombatLockdown() then
+        return true
+    end
+    local secrets = C_Secrets
+    if type(secrets) ~= "table" or type(secrets.ShouldAurasBeSecret) ~= "function" then
+        return false
+    end
+    return readable(secrets.ShouldAurasBeSecret) == false
+end
+
 -- Walk the target's harmful auras, keeping only ours. Any of this may be refused in a fight - that is
 -- expected, not an error, and the cast-driven clock carries on regardless.
 local function readFromTarget(unit)
@@ -236,15 +282,21 @@ local function readFromTarget(unit)
     if not guid then
         return
     end
+    local seen, refused = {}, false
     for index = 1, 40 do
         local ok, aura = pcall(auras.GetAuraDataByIndex, unit, index, "HARMFUL|PLAYER")
-        if not ok or aura == nil then
+        if not ok then
+            refused = true
+            break
+        end
+        if aura == nil then
             break
         end
         local read = readAura(aura)
         if read then
             local spell = string.lower(read.name)
             if Dots:IsTracked(spell) then
+                seen[spell] = true
                 -- the truth, and usually a lesson too - but not for a finisher, whose next cast may be
                 -- bought with fewer points and run for less
                 if not COMBO_SECONDS[spell] then
@@ -262,6 +314,21 @@ local function readFromTarget(unit)
                 if spells and (not existing or math.abs(existing.endTime - read.endTime) > 0.5) then
                     start(guid, spell, read.name, read.texture,
                         read.endTime - read.total, read.total, "aura")
+                end
+            end
+        end
+    end
+
+    -- A tracked DoT of ours that the walk did not find is over: dispelled, ended early, or on a corpse.
+    -- Only when the walk was allowed AND the client says auras are readable right now - an empty walk
+    -- under secrecy proves nothing, and a live DoT must never leave the bar because the client hid it.
+    if not refused and aurasReadableNow() then
+        local spells = applied[guid]
+        if spells then
+            for spell in pairs(spells) do
+                if not seen[spell] then
+                    spells[spell] = nil
+                    Dots.stats.droppedGone = (Dots.stats.droppedGone or 0) + 1
                 end
             end
         end
@@ -385,7 +452,14 @@ local function onCast(_, _, _, spellID)
 end
 
 ns:OnPlayerUnit("UNIT_SPELLCAST_SUCCEEDED", onCast) -- the client filters it to you
-ns:On("PLAYER_TARGET_CHANGED", function() readFromTarget("target") end)
+ns:On("PLAYER_TARGET_CHANGED", function()
+    if not dropIfDead("target") then
+        readFromTarget("target")
+    end
+end)
+-- UNIT_HEALTH fires when the target dies (the value is secret; the event is not), UNIT_FLAGS too
+ns:On("UNIT_HEALTH", function(_, unit) if unit == "target" then dropIfDead("target") end end)
+ns:On("UNIT_FLAGS", function(_, unit) if unit == "target" then dropIfDead("target") end end)
 ns:On("UNIT_AURA", function(_, unit)
     if unit == "target" then
         readFromTarget("target")
@@ -408,6 +482,7 @@ function Dots:Report()
         end
     end
     return { enemies = enemies, timers = timers, learned = learned, observed = observed,
+        dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
         expected = COMBO_SECONDS, tracked = self:GetTracked() }
 end
 

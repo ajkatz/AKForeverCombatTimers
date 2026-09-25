@@ -1670,6 +1670,57 @@ scenario("DoTs are remembered per enemy: switch away and back and the clock is w
     equal(string.format("%.1f", remaining), "8.0", "four of the twelve seconds are gone")
 end)
 
+scenario("the target dies: its DoTs leave the bar at once, even while the corpse stays targeted", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now), "burning")
+
+    state.dead.target = true
+    Mock.fire("UNIT_HEALTH", "target") -- the value is secret; the event still fires on death
+    equal(ns.Dots:Get(1, Mock.now), nil, "gone with the mob")
+    equal(ns.Dots:Report().dropped.dead, 1)
+end)
+
+scenario("an empty aura walk in a fight proves nothing: a live DoT stays when the client is hiding auras", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    Mock.setCombat(true)
+    state.aurasOpenInCombat = true   -- the walk is allowed ...
+    state.unitAuras.target = {}      -- ... and finds nothing, because the client is hiding them
+    Mock.fire("UNIT_AURA", "target")
+    check(ns.Dots:Get(1, Mock.now), "still on the bar: ShouldAurasBeSecret says the walk cannot be believed")
+    equal(ns.Dots:Report().dropped.gone, 0)
+end)
+
+scenario("out of a fight, a DoT the aura walk no longer finds is over - dispelled, or ended early", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now))
+
+    state.unitAuras.target = {} -- dispelled: the walk is allowed, readable, and finds nothing
+    Mock.fire("UNIT_AURA", "target")
+    equal(ns.Dots:Get(1, Mock.now), nil, "gone from the bar as it is gone from the mob")
+    equal(ns.Dots:Report().dropped.gone, 1)
+end)
+
+scenario("one mob dying does not touch another mob's remembered DoT", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    state.guids.target = "Creature-0-0-0-0-111-B"
+    castFlameShock()
+
+    state.dead.target = true -- B dies
+    Mock.fire("UNIT_HEALTH", "target")
+    equal(ns.Dots:Get(1, Mock.now), nil, "B's is gone")
+    state.dead.target = nil
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    check(ns.Dots:Get(1, Mock.now), "A's is still burning")
+end)
+
 scenario("a DoT that has run its course leaves the bar", function()
     local ns, state = shaman()
     state.guids.target = "Creature-0-0-0-0-111-A"

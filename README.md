@@ -194,7 +194,11 @@ bound without anybody reading it. That bar runs the right length with no numbers
 honest best this client allows.
 
 Timers are kept per enemy GUID, so a mob you DoTted a minute ago still has its clock when you target it
-again; the bars themselves only ever show your current target. Where the client will not give a readable
+again; the bars themselves only ever show your current target. A mob that dies loses its timers at once, even
+while its corpse stays targeted (`UnitIsDeadOrGhost` is not secret-flagged). Out of a fight - or in one, when the
+client itself says auras are not secret right now - a tracked DoT the aura walk no longer finds is treated as
+over (dispelled, ended early); when the walk is refused or auras are hidden, an empty walk proves nothing and
+nothing is dropped. Where the client will not give a readable
 GUID - an enemy player, most likely - nothing is filed at all, rather than guessing whose DoT it was.
 
 ## Reactive windows

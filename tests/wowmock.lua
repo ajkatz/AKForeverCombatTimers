@@ -441,6 +441,7 @@ function Mock.install(options)
         return state.units[unit]
     end
     G.UnitExists = function(unit) return unitInfo(unit) ~= nil end
+    G.UnitIsDeadOrGhost = function(unit) return state.dead[unit] == true end -- no secret flag on this one
     G.UnitName = function(unit)
         local info = unitInfo(unit)
         return info and info.name
@@ -552,6 +553,7 @@ function Mock.install(options)
     state.auras, state.spellNames = {}, options.spellNames or {}
     -- a GUID to file an enemy under, and the debuffs standing on one
     state.guids = options.guids or { player = "Player-0-0-0-0-1" }
+    state.dead = {} -- [unit] = true once it has died
     state.secretGUIDs = options.secretGUIDs or false
     state.unitAuras = {} -- [unit] = { { name, duration, expirationTime, icon, mine } }
     local function auraSecret(aura) return state.inCombat and not aura.neverSecret end
