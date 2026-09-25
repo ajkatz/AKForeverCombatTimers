@@ -483,3 +483,44 @@ ns:Listen("COMBAT_START", function()
         end
     end)
 end)
+
+------------------------------------------------------------------------
+-- The same trick, offered to anything else whose length a finisher's combo points decide: the client
+-- puts the (secret) points through a curve of ours and hands back a (secret) negative duration, which is
+-- exactly what a status bar wants as its lower bound. The DoT bars use it for Rupture and Rip, whose
+-- length no table can predict, because the points that bought it were never readable.
+------------------------------------------------------------------------
+function Buffs:ComboBound(name, secondsTable)
+    local key = "combo:" .. string.lower(name or "")
+    Buffs.curves = Buffs.curves or {}
+    if Buffs.curves[key] == nil then
+        Buffs.curves[key] = false
+        local create = C_CurveUtil and C_CurveUtil.CreateCurve
+        if type(secondsTable) == "table" and #secondsTable > 0
+            and type(create) == "function" and type(UnitPowerPercent) == "function" then
+            pcall(function()
+                local curve = create()
+                if curve.SetType and Enum and Enum.LuaCurveType then
+                    curve:SetType(Enum.LuaCurveType.Linear)
+                end
+                curve:AddPoint(0, 0)
+                for points, base in ipairs(secondsTable) do
+                    curve:AddPoint(points / #secondsTable, -base)
+                end
+                Buffs.curves[key] = curve
+            end)
+        end
+    end
+    local curve = Buffs.curves[key] or nil
+    if not curve then
+        return nil
+    end
+    local ok, count, value = pack(pcall(UnitPowerPercent, "player", POWER_COMBO_POINTS, false, curve))
+    if not ok or count == 0 then
+        return nil
+    end
+    if ns.IsSecret(value) or type(value) == "number" then
+        return value -- secret or plain, it is never looked at here
+    end
+    return nil
+end

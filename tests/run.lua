@@ -263,10 +263,14 @@ scenario("order, sizes and alignment: bars are rearranged within their half, eac
     equal(y(bars.ENEMY), 0, "the enemy's last bar sits on the seam")
     check(y(bars.TCAST) > y(bars.ENEMY), "the enemy's grow UP")
 
+    -- "up" moves it up a row, whatever its neighbours happen to be: pinning a particular neighbour
+    -- here only pins how many bars existed the day it was written.
+    local before = y(bars.CAST)
     SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast up")
     SlashCmdList.AKFOREVERCOMBATTIMERS("bar cast up")
     ns.Bars:Update()
-    check(y(bars.CAST) > y(bars.OH), "your cast moved above the off hand")
+    check(y(bars.CAST) > before, "your cast moved up two rows")
+    check(y(bars.CAST) < y(bars.MH), "but not past the first of yours")
     SlashCmdList.AKFOREVERCOMBATTIMERS("order enemy tcast cast mh oh")
     ns.Bars:Update()
     equal(y(bars.TCAST), 0, "target cast on the seam now, incoming hit above it")
@@ -550,6 +554,22 @@ scenario("cast bars: idle rows stay reserved, so nothing jumps when somebody sta
     Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED")
     ns.Bars:Update()
     equal(bars.CAST:IsShown(), false); equal(bars.TCAST:IsShown(), false)
+end)
+
+scenario("unlocked: a lock button, so finishing does not mean remembering a command", function()
+    local ns = start()
+    ns.Bars:Update()
+    local tab, lock = AKForeverCombatTimersTab, AKForeverCombatTimersLock
+    check(lock, "the button exists")
+    equal(lock.text.__text, "lock")
+    equal(lock:IsShown(), true, "it is there while the tab is")
+
+    lock.__scripts.OnClick(lock)
+    equal(ns:GetOption("locked"), true, "one click and the block is locked")
+    ns.Bars:Update()
+    equal(tab:IsShown(), false, "the tab goes ...")
+    equal(lock:IsVisible(), false, "... and the button with it, being its child")
+    equal(#Mock.errors, 0)
 end)
 
 scenario("unlocked: a small tab to drag the block by; idle rows are click-through space with faint marks", function()
@@ -1567,6 +1587,333 @@ scenario("Plainsrunning: gone, not a tauren, or the buff is called something els
     equal(ns.Bars.bars.PLAINS.time:GetText(), "30%")
     SlashCmdList.AKFOREVERCOMBATTIMERS("plains")
     check(#Mock.printed > 0)
+end)
+
+------------------------------------------------------------------------
+-- DoT bars. The point of these: a DoT's duration is a constant we know, and your own casts are never
+-- secret - so unlike the buff bar, a DoT can show real numbers in a fight without reading anything.
+------------------------------------------------------------------------
+local FLAME_SHOCK = 8050
+
+local function shaman(setup)
+    return start({ class = "SHAMAN", spellNames = { [FLAME_SHOCK] = "Flame Shock" } }, setup)
+end
+
+local function castFlameShock()
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", FLAME_SHOCK)
+end
+
+scenario("a DoT you cast starts a real countdown, from a duration we already know", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "the first bar slot has something to show")
+    equal(dot.name, "Flame Shock")
+    equal(dot.total, 12, "Flame Shock runs twelve seconds")
+    equal(dot.timesReadable, true, "our own arithmetic, not a secret bound")
+
+    local fraction, remaining = ns.Dots:GetProgress(dot, Mock.now + 3)
+    equal(string.format("%.2f", fraction), "0.75")
+    equal(remaining, 9)
+end)
+
+scenario("... and it still works in a fight, where the auras are shut to us", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.setCombat(true) -- GetAuraDataByIndex raises in here, exactly as the player's own auras do
+    castFlameShock()
+
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "a fight is where a DoT timer earns its place")
+    equal(dot.source, "cast")
+    equal(#Mock.errors, 0, "the refused aura lookup is expected, not an error")
+end)
+
+scenario("a readable aura corrects the clock AND teaches how long that spell really runs", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    -- a talented Flame Shock: longer than the table says, and the aura is the one that knows
+    state.unitAuras.target = { { name = "Flame Shock", duration = 18,
+        expirationTime = Mock.now + 18, icon = 135813 } }
+    Mock.fire("PLAYER_TARGET_CHANGED")
+
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "the aura put it on the bar")
+    equal(dot.total, 18, "the aura's duration, not the table's")
+    equal(dot.source, "aura")
+
+    -- and the lesson sticks: a later cast, with no aura to read, uses what was learned
+    state.unitAuras.target = nil
+    state.guids.target = "Creature-0-0-0-0-111-B" -- a different mob, nothing known about it
+    Mock.setCombat(true)
+    castFlameShock()
+    equal(ns.Dots:Get(1, Mock.now).total, 18, "taught once, used thereafter")
+end)
+
+scenario("DoTs are remembered per enemy: switch away and back and the clock is where you left it", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    Mock.advance(4)
+
+    -- a different mob: nothing of ours on it, so no bar
+    state.guids.target = "Creature-0-0-0-0-111-B"
+    equal(ns.Dots:Get(1, Mock.now), nil, "a fresh mob has no DoT of yours")
+
+    -- back to the first: still burning, and four seconds shorter
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "the first mob's timer was kept")
+    local _, remaining = ns.Dots:GetProgress(dot, Mock.now)
+    equal(string.format("%.1f", remaining), "8.0", "four of the twelve seconds are gone")
+end)
+
+scenario("a DoT that has run its course leaves the bar", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now), "on the bar")
+    Mock.advance(13)
+    equal(ns.Dots:Get(1, Mock.now), nil, "and off it again")
+end)
+
+scenario("an enemy the client will not name is not guessed at", function()
+    local ns, state = shaman()
+    state.secretGUIDs = true -- no readable GUID: nothing to file the DoT under
+    castFlameShock()
+    equal(ns.Dots:Get(1, Mock.now), nil, "no bar rather than a bar against the wrong mob")
+    equal(#Mock.errors, 0)
+end)
+
+scenario("a tracked spell whose duration nobody knows gets no bar at all", function()
+    local ns, state = start({ class = "SHAMAN", spellNames = { [999] = "Invented Curse" } })
+    SlashCmdList.AKFOREVERCOMBATTIMERS("dot add Invented Curse")
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-2", 999)
+
+    -- adding does not displace the class default, so the new one takes the second slot
+    equal(ns.Dots:SlotLabel("DOT2"), "Invented Curse")
+    equal(ns.Dots:Get(2, Mock.now), nil, "a confident wrong number is worse than no bar")
+end)
+
+scenario("only the spells you asked for, and only as many bars as there are", function()
+    local ns = start({ class = "SHAMAN" })
+    equal(ns.Dots:SlotLabel("DOT1"), "Flame Shock", "a shaman starts with the obvious one")
+    equal(ns.Dots:SlotLabel("DOT2"), nil, "and the other slots take no row")
+
+    SlashCmdList.AKFOREVERCOMBATTIMERS("dot add Frost Shock")
+    equal(ns.Dots:SlotLabel("DOT2"), "Frost Shock")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("dot remove Flame Shock")
+    equal(ns.Dots:SlotLabel("DOT1"), "Frost Shock", "the list closes up behind it")
+
+    SlashCmdList.AKFOREVERCOMBATTIMERS("dot reset")
+    equal(ns.Dots:SlotLabel("DOT1"), "Flame Shock", "back to the class default")
+end)
+
+-- Rip and Rupture: bought with combo points, so no table and no memory can say how long one runs.
+local RUPTURE = 1943
+
+local function rogue(options)
+    options = options or {}
+    options.class, options.spellNames = "ROGUE", { [RUPTURE] = "Rupture" }
+    return start(options)
+end
+
+scenario("a rogue and a druid get their own DoT without asking", function()
+    local ns = rogue()
+    equal(ns.Dots:SlotLabel("DOT1"), "Rupture")
+
+    local druid = start({ class = "DRUID" })
+    equal(druid.Dots:SlotLabel("DOT1"), "Moonfire")
+    equal(druid.Dots:SlotLabel("DOT2"), "Rip")
+end)
+
+scenario("a finisher DoT is timed by the points that bought it - secret length and all", function()
+    local ns, state = rogue({ comboPoints = 3 })
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.setCombat(true) -- the auras are shut in here; the points are still ours to spend
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-3", RUPTURE)
+
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "a three-point Rupture has a bar")
+    equal(dot.source, "combo points")
+    equal(dot.timesReadable, false, "its length may be shown but never read")
+    equal(dot.secretEnd, 0, "the bar runs up to nought from a lower bound nobody may look at")
+    equal(#Mock.errors, 0)
+
+    -- and the bar draws: full at the cast, empty when the points' worth of seconds is gone
+    ns.Bars:Update()
+    local bar = ns.Bars.bars.DOT1
+    equal(string.format("%.2f", Mock.barFraction(bar.status)), "1.00", "full the moment it lands")
+    Mock.advance(6)
+    ns.Bars:Update()
+    equal(string.format("%.2f", Mock.barFraction(bar.status)), "0.50", "half gone after six of its twelve")
+end)
+
+scenario("a finisher's length is never remembered: the next cast may be bought with fewer points", function()
+    local ns, state = rogue({ comboPoints = 5 })
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    state.unitAuras.target = { { name = "Rupture", duration = 16, expirationTime = Mock.now + 16 } }
+    Mock.fire("PLAYER_TARGET_CHANGED")
+
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "out of a fight the aura is readable, and it is exact")
+    equal(dot.total, 16, "sixteen seconds, with numbers on the bar")
+    equal(dot.timesReadable, true)
+    equal(ns.Dots:Report().learned.rupture, nil,
+        "and nothing was learned from it - a two-point Rupture next time would be a lie")
+end)
+
+scenario("every real Rupture length is written down, because the table was only ever believed", function()
+    local ns, state = rogue({ comboPoints = 5 })
+    state.guids.target = "Creature-0-0-0-0-111-A"
+
+    -- three casts, three different numbers of points, three real auras to read
+    for _, length in ipairs({ 16, 10, 16 }) do
+        state.unitAuras.target = { { name = "Rupture", duration = length,
+            expirationTime = Mock.now + length } }
+        Mock.fire("PLAYER_TARGET_CHANGED")
+        Mock.advance(0.1)
+    end
+
+    local seen = ns.Dots:Report().observed.rupture
+    equal(seen["16"], 2, "seen twice")
+    equal(seen["10"], 1)
+    equal(ns.Dots:Report().learned.rupture, nil, "and still nothing was learned as a fixed length")
+end)
+
+scenario("a client with no curves to offer simply gives a finisher no bar", function()
+    local ns, state = rogue({ comboPoints = 3, noCurves = true })
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.setCombat(true)
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-4", RUPTURE)
+
+    equal(ns.Dots:Get(1, Mock.now), nil, "no bar rather than one of invented length")
+    equal(#Mock.errors, 0)
+end)
+
+------------------------------------------------------------------------
+-- Reactive windows. UNIT_COMBAT names the victim by plain token and the outcome by name (measured:
+-- readable in combat), so four of the five triggers are exact; Overpower's "target dodged" has to be
+-- shown to be YOUR swing when you are in a group.
+------------------------------------------------------------------------
+local OVERPOWER, RIPOSTE, MONGOOSE = 7384, 14251, 1495
+
+scenario("you parry: the Riposte window opens for five seconds, and closes the moment you use it", function()
+    local ns, state = start({ class = "ROGUE", spellNames = { [RIPOSTE] = "Riposte" } })
+    equal(ns.Reactive:SlotLabel("REACT1"), "Riposte", "a rogue starts with it")
+    Mock.hit("player", "PARRY")
+
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "open")
+    equal(window.total, 5)
+    equal(window.timesReadable, true, "a constant of ours, counted with our own clock")
+    local _, remaining = ns.Reactive:GetProgress(window, Mock.now + 2)
+    equal(remaining, 3)
+
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", RIPOSTE)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "used: gone from the bar as it is gone from you")
+    equal(ns.Reactive.stats.closedByUse, 1)
+end)
+
+scenario("you dodge: Mongoose Bite; a window nobody used runs out on its own", function()
+    local ns = start({ class = "HUNTER", spellNames = { [MONGOOSE] = "Mongoose Bite" } })
+    equal(ns.Reactive:SlotLabel("REACT1"), "Mongoose Bite"); equal(ns.Reactive:SlotLabel("REACT2"), "Counterattack")
+    Mock.hit("player", "DODGE")
+    check(ns.Reactive:Get(1, Mock.now), "open")
+    equal(ns.Reactive:Get(2, Mock.now), nil, "a dodge is not a parry: Counterattack stays shut")
+    Mock.advance(5.5)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+    equal(ns.Reactive.stats.expired, 1)
+end)
+
+scenario("Revenge opens on a block, a dodge or a parry - anything you turned aside", function()
+    local ns = start({ class = "WARRIOR" })
+    equal(ns.Reactive:SlotLabel("REACT2"), "Revenge")
+    for _, action in ipairs({ "BLOCK", "DODGE", "PARRY" }) do
+        Mock.hit("player", action)
+        check(ns.Reactive:Get(2, Mock.now), "Revenge opens on " .. action)
+        Mock.advance(6)
+    end
+    equal(ns.Reactive.stats.opened, 3)
+end)
+
+scenario("Overpower, alone in the world: any dodge by the target is yours", function()
+    local ns = start({ class = "WARRIOR" })
+    Mock.hit("target", "DODGE")
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "open")
+    equal(window.why, "solo")
+end)
+
+scenario("Overpower, in a group: a target dodge is only yours if it lines up with a swing of yours", function()
+    local ns, state = start({ class = "WARRIOR" }, function(s) s.attackSpeed.player = { 2.6, nil, nil } end)
+    state.inGroup = true
+
+    -- somebody else's swing was dodged: nothing of yours happened near it
+    Mock.hit("target", "DODGE")
+    equal(ns.Reactive:Get(1, Mock.now), nil, "not yours")
+    equal(ns.Reactive.stats.notYours, 1)
+
+    -- your swing lands (the next one starts), and the dodge arrives on its heels
+    Mock.swing(2.6, 0)
+    Mock.advance(0.05)
+    Mock.hit("target", "DODGE")
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "yours")
+    equal(window.why, "your swing")
+end)
+
+scenario("Overpower, in a group: a melee ability of yours going off counts too", function()
+    local ns, state = start({ class = "WARRIOR", spellNames = { [7384] = "Overpower", [845] = "Cleave" } })
+    state.inGroup = true
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-2", 845)
+    Mock.advance(0.2)
+    Mock.hit("target", "DODGE")
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "yours")
+    equal(window.why, "your ability")
+
+    -- and using Overpower closes it
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-3", 7384)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+end)
+
+scenario("an Overpower window belongs to the mob that dodged: a new target has not", function()
+    local ns = start({ class = "WARRIOR" })
+    Mock.hit("target", "DODGE")
+    check(ns.Reactive:Get(1, Mock.now))
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+end)
+
+scenario("a secret UNIT_COMBAT payload opens nothing and raises nothing", function()
+    local ns = start({ class = "WARRIOR" })
+    Mock.fire("UNIT_COMBAT", "target", { __secretObject = true, __value = "DODGE" }, nil, 0, 1)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+    equal(ns.Reactive.stats.secretEvents, 1)
+    equal(#Mock.errors, 0)
+end)
+
+scenario("/fct react: list, add, refuse the unknown, remove, reset", function()
+    local ns = start({ class = "ROGUE" })
+    SlashCmdList.AKFOREVERCOMBATTIMERS("react add Backstab")
+    equal(ns.Reactive:SlotLabel("REACT2"), nil, "it does not know how to open a window for that, so it says no")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("react add Overpower")
+    equal(ns.Reactive:SlotLabel("REACT2"), "Overpower")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("react remove Riposte")
+    equal(ns.Reactive:SlotLabel("REACT1"), "Overpower", "the list closes up")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("react reset")
+    equal(ns.Reactive:SlotLabel("REACT1"), "Riposte")
+end)
+
+scenario("a class with no reactive ability takes no rows for them", function()
+    local ns = start({ class = "SHAMAN" })
+    equal(ns.Reactive:SlotLabel("REACT1"), nil)
+    ns.Bars:Update()
+    equal(ns.Bars.HasRow("REACT1"), false)
 end)
 
 scenario("diagnostics, slash commands and logout run; the report is SavedVariables-safe", function()

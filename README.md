@@ -159,6 +159,68 @@ What the game said along the way (2026-09-19):
   of Blizzard's frames, grep its code for `GetParent()`. The test mock now fails on either mistake. Registering `UNIT_SPELLCAST_*` is safe: unlike
 `COMBAT_LOG_EVENT_UNFILTERED` those events carry no `HasRestrictions` flag in the API docs.
 
+## DoT bars
+
+How much longer your damage-over-time spells have left on what you are fighting - Flame Shock, Serpent
+Sting, Shadow Word: Pain and so on. One bar each, up to four, ordered and sized like any other bar.
+
+```
+/fct dot                     what has a bar, and how long each one is believed to run
+/fct dot add Flame Shock     give a spell a bar
+/fct dot remove Flame Shock  take it away
+/fct dot reset               back to the defaults for your class
+```
+
+**These are the one kind of timer that works properly in a fight**, and it is worth saying why. A buff of
+yours cannot be found in combat at all on this client - the aura lookup returns nothing and the instance
+ids raise - which is why Slice and Dice has to be estimated through a curve and comes out as a bar with
+no numbers on it. A DoT needs none of that, because **its duration is a constant we already know** and
+**your own casts are never secret**. A cast plus a known duration is a real countdown with real seconds,
+whatever the client will or will not say about the aura.
+
+The aura is still read whenever the client allows it, because it is the truth and the above is only
+arithmetic. A readable aura corrects the clock *and teaches* how long that spell runs for this character,
+which is how ranks, talents and anything else that stretches a DoT get accounted for without a table of
+every case. A spell nothing has taught us and that is not in the table gets **no bar** rather than a
+confident wrong number.
+
+**Rip and Rupture are a case of their own.** Their length is bought with combo points, and the points
+are secret - so no table and no remembered value can say how long one is running. Learn sixteen seconds
+from a five-point Rupture, cast a two-point one, and the bar would lie with a straight face. So for
+these: never a table duration, never a learned one. Out of a fight the aura is readable and the bar is
+exact, with numbers. In a fight the buff bar's trick applies unchanged - the client puts the secret
+points through a curve of ours and hands back a secret length, which a status bar takes as its lower
+bound without anybody reading it. That bar runs the right length with no numbers on it, which is the
+honest best this client allows.
+
+Timers are kept per enemy GUID, so a mob you DoTted a minute ago still has its clock when you target it
+again; the bars themselves only ever show your current target. Where the client will not give a readable
+GUID - an enemy player, most likely - nothing is filed at all, rather than guessing whose DoT it was.
+
+## Reactive windows
+
+How long you still have to press **Overpower, Revenge, Mongoose Bite, Counterattack or Riposte** - the
+abilities that only open for a few seconds after a dodge, a parry or a block. One bar each, up to three.
+
+```
+/fct react                    what has a bar, and the counts
+/fct react add Revenge        give one a bar (only the five above: it has to know what opens it)
+/fct react remove Revenge
+/fct react reset              back to your class's defaults
+```
+
+The combat log is forbidden to addons on this client, but `UNIT_COMBAT` is not - *"this unit was just
+hit / dodged / parried / blocked"*, by name, readable in combat (measured: 306 events, none secret). It
+names the **victim**, which is exactly right for four of the five: you dodged, you parried, you blocked.
+The window is a constant we know (five seconds), so the bar counts real numbers down with nothing secret
+anywhere, and it closes the moment you *use* the ability - your own casts are never secret.
+
+**Overpower is the wrinkle.** It opens when the target dodges *your* attack, and "target dodged" cannot
+say whose. Alone, it is you. In a group the dodge has to line up with a swing of yours - and this addon
+owns the swing timers: `PLAYER_SWING` fires the instant a swing lands, and your melee abilities arrive on
+`UNIT_SPELLCAST_SUCCEEDED`. A target dodge within 0.4s of either is yours; anything else is counted as
+somebody else's in `/fct react` rather than shown. Nothing else in the game is placed to make that call.
+
 ## How it works
 
 ```

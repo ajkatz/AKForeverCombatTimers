@@ -36,6 +36,15 @@ local COLORS = {
     CAST = { 0.30, 0.58, 0.95 },
     TCAST = { 0.95, 0.52, 0.15 },
     BUFF = { 0.78, 0.45, 0.90 },
+    -- one family, four shades: they sit together and want telling apart at a glance
+    DOT1 = { 0.85, 0.35, 0.55 },
+    DOT2 = { 0.90, 0.50, 0.35 },
+    DOT3 = { 0.70, 0.40, 0.75 },
+    DOT4 = { 0.55, 0.45, 0.85 },
+    -- urgent by nature: a window is a few seconds to act in
+    REACT1 = { 0.95, 0.75, 0.20 },
+    REACT2 = { 0.95, 0.55, 0.20 },
+    REACT3 = { 0.85, 0.35, 0.20 },
     PLAINS = { 0.45, 0.80, 0.45 }, -- (Plainsrunning recolours it: green while it grows, red while it drains)
 }
 
@@ -44,8 +53,17 @@ local SOURCES = {
     CAST = function(now) return Casts:Get("player", now) end,
     TCAST = function(now) return Casts:Get("target", now) end,
     BUFF = function(now) return ns.Buffs and ns.Buffs:Get(now) or nil end,
+    DOT1 = function(now) return ns.Dots and ns.Dots:Get(1, now) or nil end,
+    DOT2 = function(now) return ns.Dots and ns.Dots:Get(2, now) or nil end,
+    DOT3 = function(now) return ns.Dots and ns.Dots:Get(3, now) or nil end,
+    DOT4 = function(now) return ns.Dots and ns.Dots:Get(4, now) or nil end,
+    REACT1 = function(now) return ns.Reactive and ns.Reactive:Get(1, now) or nil end,
+    REACT2 = function(now) return ns.Reactive and ns.Reactive:Get(2, now) or nil end,
+    REACT3 = function(now) return ns.Reactive and ns.Reactive:Get(3, now) or nil end,
 }
-local TEST_CYCLES = { ENEMY = 2.0, MH = 2.6, OH = 1.7, RG = 3.0, CAST = 2.5, TCAST = 3.2, BUFF = 9.0, PLAINS = 6.0 }
+local TEST_CYCLES = { ENEMY = 2.0, MH = 2.6, OH = 1.7, RG = 3.0, CAST = 2.5, TCAST = 3.2, BUFF = 9.0,
+    PLAINS = 6.0, DOT1 = 12.0, DOT2 = 15.0, DOT3 = 18.0, DOT4 = 24.0,
+    REACT1 = 5.0, REACT2 = 5.0, REACT3 = 5.0 }
 
 local root, upper, lower -- the seam (what moves), and the two halves hanging off it
 local bars = {}          -- [key] = bar
@@ -308,7 +326,8 @@ local function setIdleLook(bar)
     bar.status:SetMinMaxValues(0, 1)
     bar.status:SetValue(0)
     bar.spark:Hide()
-    bar.label:SetText(Settings.LABELS[bar.key])
+    bar.label:SetText((ns.Dots and ns.Dots:SlotLabel(bar.key))
+        or (ns.Reactive and ns.Reactive:SlotLabel(bar.key)) or Settings.LABELS[bar.key])
     bar.icon:SetTexture(nil)
     bar.fraction = nil
 end
@@ -428,6 +447,10 @@ local function applies(key, now)
         return idle ~= nil and idle < math.max(10, Settings:Get(key, "after"))
     elseif key == "BUFF" then
         return ns.Buffs ~= nil and ns.Buffs:HasTracked()
+    elseif string.find(key, "^DOT%d$") then
+        return ns.Dots ~= nil and ns.Dots:SlotLabel(key) ~= nil
+    elseif string.find(key, "^REACT%d$") then
+        return ns.Reactive ~= nil and ns.Reactive:SlotLabel(key) ~= nil
     elseif key == "PLAINS" then
         return ns.Plains ~= nil and ns.Plains:Applies()
     end
@@ -757,6 +780,24 @@ local function create()
             GameTooltip:Hide()
         end
     end)
+    -- A lock button under the tab. Unlocking is a typed command, but stopping should be a click:
+    -- needing to remember "/fct lock" to put things back is how a block ends up left unlocked.
+    local lock = CreateFrame("Button", "AKForeverCombatTimersLock", tab)
+    lock:SetSize(52, 14)
+    lock:SetPoint("TOP", tab, "BOTTOM", 0, -3)
+    lock.tint = lock:CreateTexture(nil, "BACKGROUND")
+    lock.tint:SetAllPoints(lock)
+    lock.tint:SetColorTexture(0.75, 0.2, 0.2, 0.85)
+    lock.text = lock:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lock.text:SetPoint("CENTER", lock, "CENTER", 0, 0)
+    lock.text:SetText("lock")
+    lock:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    lock:SetScript("OnClick", function()
+        ns:SetOption("locked", true)
+        ns:Print("locked. |cffffd100/fct unlock|r brings the drag tab back.")
+    end)
+    tab.lock = lock
+
     root.tab = tab
 
     for _, key in ipairs(Settings.KEYS) do
@@ -771,7 +812,8 @@ local function create()
     if not ns:GetOption("locked") and not ns.cdb.lockHintShown then
         ns.cdb.lockHintShown = true
         ns:Print("the block is unlocked: drag the blue 'timers' tab to place it, click it for the settings. "
-            .. "|cffffd100/fct lock|r hides the tab and the row marks - after that a bar only shows while something is happening.")
+            .. "The red |cffffd100lock|r button under it hides the tab and the row marks - after that a "
+            .. "bar only shows while something is happening. (|cffffd100/fct lock|r does the same.)")
     end
 
     local driver = CreateFrame("Frame") -- never hidden: a hidden block could not wake itself up

@@ -15,6 +15,9 @@ local ADDON = "AKForeverCombatTimers"
 local WIDGET_METHODS = {
     "SetSize", "SetWidth", "SetHeight", "GetWidth", "GetHeight", "SetPoint", "ClearAllPoints", "SetAllPoints",
     "GetPoint", "Show", "Hide", "IsShown", "IsVisible", "SetShown", "SetAlpha", "GetAlpha", "SetParent", "GetParent",
+    -- a Button has a highlight; a mock without one turns "this client is missing a method" into
+    -- "every bar is nil", which is a long way from the cause
+    "SetHighlightTexture", "SetNormalTexture", "SetPushedTexture", "RegisterForClicks", "Click",
     "SetMovable", "SetClampedToScreen", "SetClampRectInsets", "EnableMouse", "RegisterForDrag", "StartMoving",
     "StopMovingOrSizing", "SetUserPlaced", "SetFrameLevel", "GetFrameLevel", "SetFrameStrata", "SetScript",
     "GetScript", "HookScript", "RegisterEvent", "RegisterUnitEvent", "UnregisterEvent", "CreateTexture",
@@ -140,7 +143,19 @@ function implementations.Show(self) self.__shown = true end
 function implementations.Hide(self) self.__shown = false end
 function implementations.SetShown(self, shown) self.__shown = shown and true or false end
 function implementations.IsShown(self) return self.__shown end
-function implementations.IsVisible(self) return self.__shown end
+-- IsShown is this frame's own flag; IsVisible also needs every ancestor shown, which is what the real
+-- client means by it. A mock that treats them as the same can call a frame visible inside a hidden
+-- parent, and then a bar that never appears looks fine in the tests.
+function implementations.IsVisible(self)
+    local frame = self
+    while frame do
+        if not frame.__shown then
+            return false
+        end
+        frame = frame.__parent
+    end
+    return true
+end
 function implementations.GetParent(self) return self.__parent end
 function implementations.SetText(self, text)
     refuseIfStrict("SetText", text)
@@ -458,6 +473,8 @@ function Mock.install(options)
     end
     G.UnitAffectingCombat = function() return state.inCombat end
     G.IsInRaid = function() return state.inRaid or false end
+    G.IsInGroup = function() return state.inGroup or state.inRaid or false end
+    G.GetNumGroupMembers = function() return (state.inGroup or state.inRaid) and 5 or 0 end
     G.UnitAttackSpeed = function(unit)
         local speeds = state.attackSpeed[unit]
         if speeds == Mock.SECRET then
@@ -533,6 +550,10 @@ function Mock.install(options)
     -- Blizzard's rule: aura data is secret while combat restrictions are in effect (unless the spell is
     -- flagged never-secret); lookups by spell id then return NOTHING. state.auras[spellID] = { ... }.
     state.auras, state.spellNames = {}, options.spellNames or {}
+    -- a GUID to file an enemy under, and the debuffs standing on one
+    state.guids = options.guids or { player = "Player-0-0-0-0-1" }
+    state.secretGUIDs = options.secretGUIDs or false
+    state.unitAuras = {} -- [unit] = { { name, duration, expirationTime, icon, mine } }
     local function auraSecret(aura) return state.inCombat and not aura.neverSecret end
     local function auraView(aura)
         if not auraSecret(aura) then
@@ -554,7 +575,33 @@ function Mock.install(options)
         GetSpellName = function(spellID) return state.spellNames[spellID] end,
         GetSpellTexture = function(spellID) return 130000 + spellID end,
     }
+    -- One creature, one name. A unit the client is protecting has no readable GUID, and then a DoT
+    -- on it cannot be filed at all - which the addon treats as "do not guess", not as an error.
+    G.UnitGUID = function(unit)
+        if state.secretGUIDs then
+            return Mock.SECRET
+        end
+        return state.guids[unit]
+    end
+
     G.C_UnitAuras = {
+        -- Debuffs on somebody else. Refuses in a fight, the same way the player's own auras were
+        -- measured to on this client.
+        GetAuraDataByIndex = function(unit, index, filter)
+            if state.inCombat and not state.aurasOpenInCombat then
+                error("GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'AKForeverCombatTimers'")
+            end
+            local list = state.unitAuras[unit]
+            local aura = list and list[index]
+            if not aura then
+                return nil
+            end
+            if filter == "HARMFUL|PLAYER" and aura.mine == false then
+                return { name = "somebody else's", duration = 5, expirationTime = Mock.now + 5 }
+            end
+            return { name = aura.name, duration = aura.duration,
+                expirationTime = aura.expirationTime, icon = aura.icon }
+        end,
         -- MEASURED on the 1.60.1 client: plain out of combat, an ERROR in a fight
         GetUnitAuraInstanceIDs = function()
             if state.inCombat and not state.aurasOpenInCombat then

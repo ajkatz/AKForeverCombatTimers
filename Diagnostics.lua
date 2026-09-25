@@ -404,6 +404,23 @@ function Diagnostics:Collect()
         -- "NOT FOUND") and which display path the client took
         tracked = sanitize(ns.Buffs:GetTracked()), bar = sanitize(ns.Buffs.samples),
         probes = sanitize(ns.Buffs.probes), estimates = sanitize(ns.Buffs.estimates) }
+    -- The DoT bars: which spells own a slot, how long each was found to run (and whether a real aura
+    -- taught us that or the table did), and the last few that were put on a bar.
+    if ns.Dots then
+        local dots = ns.Dots:Report()
+        -- `observed` against `expected` is the whole answer on the Rupture / Rip numbers: the
+        -- durations a real aura actually handed over, beside the ones that were assumed.
+        report.dots = { tracked = sanitize(dots.tracked), learned = sanitize(dots.learned),
+            observedLengths = sanitize(dots.observed), assumedLengths = sanitize(dots.expected),
+            enemiesRemembered = dots.enemies, timersRunning = dots.timers,
+            recent = sanitize(ns.Dots.samples) }
+    end
+    -- The reactive windows: what has a bar, what is open right now, and the counts - in particular how
+    -- many target dodges were judged somebody else's, which is the attribution question in numbers.
+    if ns.Reactive then
+        report.reactive = sanitize(ns.Reactive:Report())
+        report.reactive.recent = sanitize(ns.Reactive.samples)
+    end
     report.bars = { settings = sanitize(ns.cdb.bars), order = sanitize(ns.BarSettings:GetOrder()),
         position = sanitize(ns.cdb.position), locked = ns:GetOption("locked") and true or false }
 

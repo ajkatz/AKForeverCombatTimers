@@ -19,15 +19,23 @@ local _, ns = ...
 local BarSettings = {}
 ns.BarSettings = BarSettings
 
-BarSettings.KEYS = { "TCAST", "ENEMY", "MH", "OH", "RG", "BUFF", "PLAINS", "CAST" }
+BarSettings.KEYS = { "TCAST", "ENEMY", "MH", "OH", "RG", "BUFF",
+    "DOT1", "DOT2", "DOT3", "DOT4", "REACT1", "REACT2", "REACT3", "PLAINS", "CAST" }
 BarSettings.LABELS = {
     TCAST = "Target cast", ENEMY = "Incoming hit", MH = "Main hand", OH = "Off hand", RG = "Ranged",
     BUFF = "Buff", PLAINS = "Plainsrunning", CAST = "Your cast",
+    -- only ever seen on an empty row: an active one wears the spell's own name
+    DOT1 = "DoT 1", DOT2 = "DoT 2", DOT3 = "DoT 3", DOT4 = "DoT 4",
+    REACT1 = "Reactive 1", REACT2 = "Reactive 2", REACT3 = "Reactive 3",
 }
 BarSettings.MODES = { "always", "used", "never" }
 BarSettings.MODE_LABELS = { always = "Always", used = "When used", never = "Never" }
 BarSettings.ANCHORS = { "LEFT", "CENTER", "RIGHT" }
+-- A DoT lands on THEM, but it is your spell and your business to keep up - so it belongs with your own
+-- bars rather than with the two things the enemy is doing to you.
 BarSettings.GROUPS = { TCAST = "enemy", ENEMY = "enemy", MH = "own", OH = "own", RG = "own", BUFF = "own",
+    DOT1 = "own", DOT2 = "own", DOT3 = "own", DOT4 = "own",
+    REACT1 = "own", REACT2 = "own", REACT3 = "own",
     PLAINS = "own", CAST = "own" }
 
 local BAR_DEFAULTS = { mode = "used", after = 3, width = 220, height = 14 }
@@ -36,6 +44,11 @@ local BAR_OVERRIDES = {
     CAST = { after = 0 },
     BUFF = { after = 0 },
     PLAINS = { after = 0 }, -- Plainsrunning is a ramp, not a timer: there while the buff is, gone with it
+
+    -- a DoT that has run out is worth a moment's glance, but not a lingering row
+    DOT1 = { after = 1 }, DOT2 = { after = 1 }, DOT3 = { after = 1 }, DOT4 = { after = 1 },
+    -- a window that closed is over: the ability is gone from the bar the moment it is gone from you
+    REACT1 = { after = 0 }, REACT2 = { after = 0 }, REACT3 = { after = 0 },
 
     RG = { after = 10 }, -- a melee class that threw something: keep it up for a while
 }
@@ -51,6 +64,8 @@ local ALIASES = {
     cast = "CAST", mycast = "CAST", player = "CAST",
     buff = "BUFF", snd = "BUFF",
     plains = "PLAINS", plainsrunning = "PLAINS", run = "PLAINS", speed = "PLAINS",
+    dot = "DOT1", dot1 = "DOT1", dot2 = "DOT2", dot3 = "DOT3", dot4 = "DOT4",
+    react = "REACT1", react1 = "REACT1", react2 = "REACT2", react3 = "REACT3", reactive = "REACT1",
 }
 
 local isKey, isMode, isAnchor = {}, {}, {}
