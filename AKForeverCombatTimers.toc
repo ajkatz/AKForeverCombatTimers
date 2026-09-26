@@ -4,6 +4,8 @@
 ## Notes: Combat timers for WoW: Forever in one block - the target's cast and the next enemy hit grow up from a seam, your main hand, off hand, ranged swings, buff timer, your damage-over-time spells on what you are fighting, the windows for Overpower / Revenge / Mongoose Bite / Counterattack / Riposte, the Plainsrunning ramp and your own cast grow down from it. Every bar: always / when used / never, size, order.
 ## Author: Purrdee
 ## X-License: MIT
+## X-Wago-ID: 4N2bkmNL
+## X-Curse-Project-ID: 1712193
 ## IconTexture: Interface\AddOns\AKForeverCombatTimers\icon
 ## SavedVariables: AKForeverCombatTimersDB
 ## OptionalDeps: AKForeverCombatTimers_SavedState
