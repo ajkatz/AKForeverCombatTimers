@@ -2,6 +2,8 @@
 .SYNOPSIS
     Installs (or removes) AKForeverCombatTimers_SavedState, a companion addon that works around
     the WoW: Forever beta client writing SavedVariables on logout but never reading them back.
+    RETIRED: client build 1.60.1.70170 (Oct 1 2026) reads SavedVariables back. Kept so that
+    -Remove can take an installed bridge out.
 
 .DESCRIPTION
     A SavedVariables file is plain Lua ("AKForeverCombatTimersDB = { ... }"). The client will not

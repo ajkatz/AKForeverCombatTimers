@@ -9,6 +9,9 @@
 --          buff (Slice and Dice ...)
 --          your cast
 --
+-- ... or the other way up ('/fct grow up'): your half stacks UP from the seam and the enemy's hangs
+-- below it, so the seam is the floor of your bars and nothing of yours reaches further down.
+--
 -- What each bar does is BarSettings' business (mode always / when used / never, seconds to linger,
 -- width, height, order inside its half). A bar that is switched off, or does not apply to the
 -- character, takes no row; every other bar keeps its row while idle, so nothing ever jumps. Bars fade
@@ -485,7 +488,8 @@ function Bars:Layout(now, force)
     lastLayoutAt = now
     local order = Settings:GetOrder()
     local anchor = Settings:GetBlock("anchor")
-    local parts = { anchor }
+    local mirrored = Settings:GetBlock("grow") == "up"
+    local parts = { anchor .. (mirrored and " up" or " down") }
     for index, key in ipairs(order) do
         local bar = bars[key]
         bar.slotted = Settings:GetMode(key) ~= "never" and applies(key, now)
@@ -516,6 +520,9 @@ function Bars:Layout(now, force)
 
     local function place(bar, container, edge, offset)
         for _, frame in ipairs({ bar, bar.ghost }) do
+            if frame:GetParent() ~= container then
+                frame:SetParent(container) -- ('/fct grow up' moves a half to the other side of the seam)
+            end
             frame:ClearAllPoints()
             if anchor == "LEFT" then
                 frame:SetPoint(edge .. "LEFT", container, edge .. "LEFT", PAD, offset)
@@ -526,16 +533,37 @@ function Bars:Layout(now, force)
             end
         end
     end
-    local down = 0 -- your half: the first bar hangs directly under the seam
-    for _, bar in ipairs(halves.own) do
+    -- the halves: yours hangs under the seam (its first bar directly under it) and the enemy's stacks
+    -- above (its LAST bar on the seam) - or, mirrored, the other way round: yours stacks up from the
+    -- seam, first bar on it, and the enemy's hangs below, last bar directly under it
+    local hanging, stacking = halves.own, halves.enemy
+    if mirrored then
+        hanging, stacking = halves.enemy, halves.own
+    end
+    local down = 0
+    local function hang(bar)
         place(bar, lower, "TOP", -down)
         down = down + bar.height + GAP
     end
-    local up = 0 -- the enemy's half: its LAST bar sits on the seam, the others stack on top of it
-    for index = #halves.enemy, 1, -1 do
-        local bar = halves.enemy[index]
+    local up = 0
+    local function stack(bar)
         place(bar, upper, "BOTTOM", up)
         up = up + bar.height + GAP
+    end
+    if mirrored then
+        for index = #hanging, 1, -1 do -- the enemy's last bar nearest the seam, as before
+            hang(hanging[index])
+        end
+        for _, bar in ipairs(stacking) do -- your first bar nearest the seam, as before
+            stack(bar)
+        end
+    else
+        for _, bar in ipairs(hanging) do
+            hang(bar)
+        end
+        for index = #stacking, 1, -1 do
+            stack(stacking[index])
+        end
     end
     lower:SetHeight(math.max(1, down - GAP + PAD))
     upper:SetHeight(math.max(1, up - GAP + PAD))

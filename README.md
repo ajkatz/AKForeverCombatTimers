@@ -42,7 +42,10 @@ being timed / the buff is up. Being in combat is not "use".
 
 The block is positioned by its seam: `/fct anchor left|center|right` says which point of it is
 pinned (and lines up bars of different widths), `/fct center` centres it on the screen, and a block
-dropped within 24 px of the centre line snaps onto it (`/fct snap off`).
+dropped within 24 px of the centre line snaps onto it (`/fct snap off`). **`/fct grow up`** turns the
+block the other way up: your bars stack *up* from the seam and the enemy's hang below it, so the seam
+is the floor of your bars and nothing of yours ever reaches further down - for a block that sits low
+on the screen. `/fct grow down` (the default) is the picture above.
 
 Locking no longer decides what is visible. Unlocked only adds a small blue **`timers` tab** next to
 the seam (drag it to move the block, click it for the settings window), the seam as a hairline, and
@@ -311,12 +314,17 @@ Fight a few things, then `/fct diag`, `/reload`, and read
 
 ## Saved settings on the Forever beta
 
-The 1.60.1 client writes SavedVariables on logout but never reads them back.
-`tools/Install-SavedStateBridge.ps1` installs a companion addon that loads the saved file as
-code before this addon starts (`-Remove` takes it out again). All data, per-character
-included, lives in the one account-wide table so a single junction covers it. Never delete
-the companion folder with `Remove-Item -Recurse` in Windows PowerShell 5.1: it follows the
-junction into the real SavedVariables folder.
+All data, per-character included, lives in one account-wide table; the per-character part is keyed by
+the character's full name and realm and comes back on your next login. Client build 1.60.1.70170
+(Oct 1 2026) reads addon settings back again; it also moved a character's surname into the realm slot
+of `UnitName`, which split profiles for a day. Profiles saved under either spelling, and those of a cold
+login, are folded into one the first time each character logs in (`/fct diag` says what was adopted).
+
+The builds before that one never read SavedVariables back; `tools/Install-SavedStateBridge.ps1`
+installed a companion addon that loaded the saved file as code before this addon started. It is no
+longer needed: `-Remove` takes it out again. Never delete the companion folder with
+`Remove-Item -Recurse` in Windows PowerShell 5.1: it follows the junction into the real SavedVariables
+folder.
 
 ## Tests
 

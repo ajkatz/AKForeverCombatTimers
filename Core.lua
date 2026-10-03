@@ -195,10 +195,9 @@ ns:On("ADDON_ACTION_FORBIDDEN", onActionBlocked)
 ns:On("ADDON_ACTION_BLOCKED", onActionBlocked)
 
 ------------------------------------------------------------------------
--- Saved variables: ONE account-wide table, per-character data under
--- db.chars["Name - Realm"]. One file is what lets the beta workaround
--- (tools/Install-SavedStateBridge.ps1) restore it: the 1.60.1 client writes
--- SavedVariables but never reads them back.
+-- Saved variables: ONE account-wide table, per-character data under db.chars["First Last - Realm"].
+-- The account-wide part is bound at ADDON_LOADED, the character's profile at PLAYER_LOGIN, when the
+-- client knows the character's name for sure (bindProfile).
 ------------------------------------------------------------------------
 local OPTION_DEFAULTS = {
     locked = false,
@@ -208,26 +207,128 @@ local OPTION_DEFAULTS = {
     -- watchUnit = nil      -- nil: auto; otherwise a unit token such as "focus"
 }
 
--- The realm is squeezed ("Classic Beta PvE" -> "ClassicBetaPvE"): on a fresh
--- login UnitFullName has no realm yet and GetRealmName() gives the spaced display
--- name, after a /reload UnitFullName gives the normalized one. Unsqueezed, that
--- would be two profiles for one character.
+-- Realm names are squeezed ("Classic Beta PvE" -> "ClassicBetaPvE"): GetRealmName() gives the spaced
+-- display name, GetNormalizedRealmName() the squeezed one.
 local function squeezeRealm(realm)
     return (string.gsub(realm, "[%s%-]", ""))
 end
 
+-- A string the addon may look at: not nil, not empty, not a secret value.
+local function readable(value)
+    if type(value) ~= "string" or value == "" or ns.IsSecret(value) then
+        return nil
+    end
+    return value
+end
+
+local function realmName()
+    local realm = GetNormalizedRealmName and readable(GetNormalizedRealmName())
+    if not realm and GetRealmName then
+        realm = readable(GetRealmName())
+        realm = realm and squeezeRealm(realm)
+    end
+    return realm
+end
+
+-- "First Last - Realm": the character's full name and realm - or nil while the client does not know the
+-- name yet (a cold login's ADDON_LOADED). Since client build 1.60.1.70170 (Oct 1 2026) WoW: Forever puts
+-- the SURNAME where the realm used to be: UnitFullName("player") answers "Purrdee", "Bubson" where earlier
+-- builds said "Purrdee Bubson", "ClassicBetaPvE". So whatever sits in the realm slot and is not the realm
+-- is the surname, and both builds end up with the key the profiles were saved under all along.
 local function characterKey()
-    local name, realm
+    local name, slot
     if UnitFullName then
-        name, realm = UnitFullName("player")
+        name, slot = UnitFullName("player")
     end
+    name = readable(name) or (UnitName and readable((UnitName("player"))))
     if not name then
-        name = UnitName("player")
+        return nil
     end
-    if not realm or realm == "" then
-        realm = GetRealmName and GetRealmName()
+    local realm = realmName()
+    slot = readable(slot)
+    if slot and realm and squeezeRealm(slot) ~= realm then
+        name = name .. " " .. slot
+    elseif slot and not realm then
+        realm = squeezeRealm(slot)
     end
-    return (name or "Unknown") .. " - " .. squeezeRealm(realm or "Unknown")
+    if not realm then
+        return nil
+    end
+    return name .. " - " .. realm
+end
+
+-- Missing values in `target` are filled from `source`, down into nested tables. Nothing that is already
+-- in `target` is overwritten.
+local function fillGaps(target, source)
+    for field, value in pairs(source) do
+        local existing = target[field]
+        if existing == nil then
+            target[field] = value
+        elseif type(existing) == "table" and type(value) == "table" then
+            fillGaps(existing, value)
+        end
+    end
+end
+
+-- The spellings earlier versions saved the same character under, best first:
+--   "First - Last"               build 70170 before this version: the surname was taken for the realm;
+--   "First Last - Spaced Realm"  an unsqueezed realm;
+--   "Unknown - Realm"            a cold login, the name not known yet when the addon loaded. Every character
+--                                that logged in cold shares it, so it goes to the first one to log in after
+--                                the update, to fill gaps only.
+local function olderSpellings(chars, key)
+    local name, realm = string.match(key, "^(.-) %- (.+)$")
+    local found = {}
+    local first, last = string.match(name, "^(%S+) (%S+)$")
+    if first and type(chars[first .. " - " .. last]) == "table" then
+        found[#found + 1] = first .. " - " .. last
+    end
+    local unsqueezed = {}
+    for other in pairs(chars) do
+        local otherName, otherRealm = string.match(other, "^(.-) %- (.+)$")
+        if other ~= key and type(chars[other]) == "table" and otherName == name and otherRealm and squeezeRealm(otherRealm) == realm then
+            unsqueezed[#unsqueezed + 1] = other
+        end
+    end
+    table.sort(unsqueezed)
+    for _, other in ipairs(unsqueezed) do
+        found[#found + 1] = other
+    end
+    if type(chars["Unknown - " .. realm]) == "table" then
+        found[#found + 1] = "Unknown - " .. realm
+    end
+    return found
+end
+
+-- The profile of the character logging in, bound at PLAYER_LOGIN: at ADDON_LOADED a cold login does not
+-- know the name yet (that is where the "Unknown - Realm" profiles came from). Until then the stand-in from
+-- initDB takes any early write; it is folded in here. A profile saved under an older spelling is adopted
+-- once: this profile keeps what it has, the older ones fill its gaps and are removed.
+local function bindProfile()
+    local key = characterKey()
+    if not key then
+        ns:Log("profile", { key = false, note = "the client did not give the character's name at login" })
+        return
+    end
+    local chars = ns.db.chars
+    local adopted = olderSpellings(chars, key)
+    local cdb = chars[key]
+    if type(cdb) ~= "table" then
+        cdb = {}
+        chars[key] = cdb
+    end
+    for _, old in ipairs(adopted) do
+        fillGaps(cdb, chars[old])
+        chars[old] = nil
+    end
+    if ns.cdb and ns.cdb ~= cdb then
+        fillGaps(cdb, ns.cdb)
+    end
+    cdb.options = cdb.options or {}
+    ns.characterKey, ns.cdb = key, cdb
+    if #adopted > 0 then
+        ns:Log("profile", { key = key, adopted = adopted })
+    end
 end
 
 local function initDB()
@@ -246,15 +347,8 @@ local function initDB()
     db.loads = (db.loads or 0) + 1
     db.chars = db.chars or {}
 
-    local key = characterKey()
-    if type(db.chars[key]) ~= "table" then
-        db.chars[key] = {}
-    end
-    local cdb = db.chars[key]
-    cdb.options = cdb.options or {}
-
-    ns.characterKey = key
-    ns.db, ns.cdb = db, cdb
+    ns.db = db
+    ns.cdb = { options = {} } -- a stand-in until bindProfile, at PLAYER_LOGIN
 end
 
 function ns:GetOption(key)
@@ -320,10 +414,11 @@ ns:On("ADDON_LOADED", function(_, addonName)
         return
     end
     initDB()
-    ns:Fire("DB_READY")
 end)
 
 ns:On("PLAYER_LOGIN", function()
+    bindProfile()
+    ns:Fire("DB_READY") -- the saved tables, the character's profile included, are in place
     local _, classFile = UnitClass("player")
     ns.playerClass = classFile
     ns.inCombat = InCombatLockdown() and true or false

@@ -7,6 +7,9 @@
 --                     moves: the enemy's bars (target cast, incoming hit) grow UP from it, yours
 --                     (main hand, off hand, ranged, your cast) grow DOWN. Bars are reordered
 --                     within their half.
+--             grow    "down" (yours hang under the seam, the enemy's stack above it) | "up" (the block
+--                     mirrored: yours stack UP from the seam, the enemy's hang below) - so the seam is
+--                     the top of your bars, or their bottom, and nothing grows past it that way
 --             anchor  LEFT | CENTER | RIGHT: which point of the seam is pinned to the screen - and
 --                     how bars of different widths line up
 --             fade    bars fade in and out instead of popping
@@ -31,6 +34,7 @@ BarSettings.LABELS = {
 BarSettings.MODES = { "always", "used", "never" }
 BarSettings.MODE_LABELS = { always = "Always", used = "When used", never = "Never" }
 BarSettings.ANCHORS = { "LEFT", "CENTER", "RIGHT" }
+BarSettings.GROWS = { "down", "up" }
 -- A DoT lands on THEM, but it is your spell and your business to keep up - so it belongs with your own
 -- bars rather than with the two things the enemy is doing to you.
 BarSettings.GROUPS = { TCAST = "enemy", ENEMY = "enemy", MH = "own", OH = "own", RG = "own", BUFF = "own",
@@ -52,7 +56,7 @@ local BAR_OVERRIDES = {
 
     RG = { after = 10 }, -- a melee class that threw something: keep it up for a while
 }
-local BLOCK_DEFAULTS = { anchor = "CENTER", fade = true, snapCenter = true }
+local BLOCK_DEFAULTS = { anchor = "CENTER", fade = true, snapCenter = true, grow = "down" }
 local LIMITS = { after = { 0, 60 }, width = { 60, 600 }, height = { 6, 60 } }
 
 local ALIASES = {
@@ -230,6 +234,11 @@ function BarSettings:SetBlock(field, value)
         end
     elseif field == "fade" or field == "snapCenter" then
         value = value and true or false
+    elseif field == "grow" then
+        value = string.lower(tostring(value or ""))
+        if value ~= "down" and value ~= "up" then
+            return false
+        end
     else
         return false
     end
@@ -349,6 +358,14 @@ ns:RegisterCommand("anchor", "'left', 'center' or 'right': which point of the se
         return
     end
     ns:Print("anchor:", string.lower(BarSettings:GetBlock("anchor")))
+end)
+
+ns:RegisterCommand("grow", "'down' (default): your bars hang under the seam, the enemy's stack above it; 'up': the block mirrored - yours stack up from the seam, the enemy's hang below. The seam never moves either way", function(rest)
+    if rest and rest ~= "" and not BarSettings:SetBlock("grow", rest) then
+        ns:Print("usage: /fct grow down | up")
+        return
+    end
+    ns:Print("grow:", BarSettings:GetBlock("grow"), BarSettings:GetBlock("grow") == "up" and "- your bars stack up from the seam" or "- your bars hang under the seam")
 end)
 
 ns:RegisterCommand("snap", "'on' (default) or 'off': a block dropped near the screen's centre line snaps onto it", function(rest)
