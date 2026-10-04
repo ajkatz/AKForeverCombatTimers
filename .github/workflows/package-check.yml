@@ -20,6 +20,10 @@ jobs:
           args: -d
       - name: What players would get
         run: |
+          if [ ! -d .release ]; then
+            echo "nothing packaged: a tag points at this commit, so the packager leaves it to the Release workflow"
+            exit 0
+          fi
           ls -la .release
           for zip in .release/*.zip; do
             echo "== $zip"
@@ -32,4 +36,5 @@ jobs:
           name: AKForeverCombatTimers-package-check
           path: .release/*.zip
           include-hidden-files: true # (.release is a dot folder)
+          if-no-files-found: ignore # (a tagged commit packages nothing here)
           retention-days: 7
