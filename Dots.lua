@@ -27,7 +27,7 @@ local CLASS_DEFAULTS = {
     SHAMAN = { "Flame Shock" },
     HUNTER = { "Serpent Sting" },
     PRIEST = { "Shadow Word: Pain" },
-    WARLOCK = { "Corruption", "Immolate", "Curse of Agony" },
+    WARLOCK = { "Corruption", "Immolate", "Bane of Agony" }, -- Forever's name for Curse of Agony
     DRUID = { "Moonfire", "Rip" },
     ROGUE = { "Rupture" },
     WARRIOR = { "Rend" },
@@ -53,6 +53,7 @@ local DURATIONS = {
     ["shadow word: pain"] = 18,
     ["corruption"] = 18,
     ["immolate"] = 15,
+    ["bane of agony"] = 24,   -- Forever renamed Curse of Agony (and Curse of Doom: Bane of Doom)
     ["curse of agony"] = 24,
     ["moonfire"] = 12,
     ["rend"] = 21,
@@ -81,9 +82,18 @@ end
 ------------------------------------------------------------------------
 -- What is tracked: spell NAMES, because ranks have different ids
 ------------------------------------------------------------------------
+-- Forever's names for spells a list may still hold under the Classic ones
+local RENAMED = { ["curse of agony"] = "Bane of Agony", ["curse of doom"] = "Bane of Doom" }
+
 function Dots:GetTracked()
     local saved = ns.cdb and ns.cdb.dots
     if type(saved) == "table" then
+        for index, name in ipairs(saved) do
+            local renamed = type(name) == "string" and RENAMED[string.lower(name)]
+            if renamed then
+                saved[index] = renamed
+            end
+        end
         return saved
     end
     return CLASS_DEFAULTS[ns.playerClass or ""] or {}

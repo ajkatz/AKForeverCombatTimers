@@ -1813,6 +1813,24 @@ scenario("a rogue and a druid get their own DoT without asking", function()
     equal(druid.Dots:SlotLabel("DOT2"), "Rip")
 end)
 
+scenario("a warlock's Bane of Agony - Forever's name for Curse of Agony - gets its bar; a saved list with the old name is read as the new", function()
+    local BANE = 980
+    local ns, state = start({ class = "WARLOCK", spellNames = { [BANE] = "Bane of Agony" } })
+    equal(ns.Dots:SlotLabel("DOT1"), "Corruption"); equal(ns.Dots:SlotLabel("DOT2"), "Immolate"); equal(ns.Dots:SlotLabel("DOT3"), "Bane of Agony")
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", BANE)
+    local dot = ns.Dots:Get(3, Mock.now)
+    check(dot, "the third slot has the Bane")
+    equal(dot.name, "Bane of Agony"); equal(dot.total, 24, "it runs as long as the curse did")
+    -- a list saved under the old name
+    ns.cdb.dots = { "Corruption", "Curse of Agony" }
+    equal(ns.Dots:GetTracked()[2], "Bane of Agony")
+    equal(ns.Dots:SlotLabel("DOT2"), "Bane of Agony")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-2", BANE)
+    check(ns.Dots:Get(2, Mock.now), "the renamed list tracks it")
+    equal(#Mock.errors, 0)
+end)
+
 scenario("a finisher DoT is timed by the points that bought it - secret length and all", function()
     local ns, state = rogue({ comboPoints = 3 })
     state.guids.target = "Creature-0-0-0-0-111-A"
