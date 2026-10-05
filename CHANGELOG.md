@@ -5,6 +5,8 @@
 - **Bane of Agony gets its bar.** Forever calls Curse of Agony "Bane of Agony" (and Curse of Doom "Bane
   of Doom"); the warlock's default DoTs and the duration table use the new name, and a saved list that
   still says "Curse of Agony" is read as the new one.
+- **Corruption runs 12 seconds** untalented on Forever (Classic's 18 was in the table); a readable aura
+  still corrects the clock when talents stretch it.
 
 ## 0.5.1
 

@@ -1814,14 +1814,18 @@ scenario("a rogue and a druid get their own DoT without asking", function()
 end)
 
 scenario("a warlock's Bane of Agony - Forever's name for Curse of Agony - gets its bar; a saved list with the old name is read as the new", function()
-    local BANE = 980
-    local ns, state = start({ class = "WARLOCK", spellNames = { [BANE] = "Bane of Agony" } })
+    local BANE, CORRUPTION = 980, 172
+    local ns, state = start({ class = "WARLOCK", spellNames = { [BANE] = "Bane of Agony", [CORRUPTION] = "Corruption" } })
     equal(ns.Dots:SlotLabel("DOT1"), "Corruption"); equal(ns.Dots:SlotLabel("DOT2"), "Immolate"); equal(ns.Dots:SlotLabel("DOT3"), "Bane of Agony")
     state.guids.target = "Creature-0-0-0-0-111-A"
     Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", BANE)
     local dot = ns.Dots:Get(3, Mock.now)
     check(dot, "the third slot has the Bane")
     equal(dot.name, "Bane of Agony"); equal(dot.total, 24, "it runs as long as the curse did")
+    -- Corruption runs twelve seconds untalented on Forever, not Classic's eighteen
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C", CORRUPTION)
+    local corruption = ns.Dots:Get(1, Mock.now)
+    check(corruption, "Corruption has the first slot"); equal(corruption.total, 12, "twelve seconds on Forever")
     -- a list saved under the old name
     ns.cdb.dots = { "Corruption", "Curse of Agony" }
     equal(ns.Dots:GetTracked()[2], "Bane of Agony")
