@@ -46,7 +46,8 @@ dropped within 24 px of the centre line snaps onto it (`/fct snap off`). **`/fct
 *floor* instead of the seam: the same picture, the same order, but the bottom of your bars sits where you
 put the block, and rows that come and go push the seam and the enemy's half up - nothing of yours ever
 reaches below that line. For a block that sits low on the screen. `/fct grow down` (the default) pins the
-seam, as in the picture above.
+seam, as in the picture above. **`/fct reverse on`** turns the picture the other way up - your bars stack
+*up* from the seam with your cast bar on top, the enemy's hang below - whichever of the two is pinned.
 
 Locking no longer decides what is visible. Unlocked only adds a small blue **`timers` tab** next to
 the seam (drag it to move the block, click it for the settings window), the seam as a hairline, and

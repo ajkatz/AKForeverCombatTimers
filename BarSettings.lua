@@ -11,6 +11,9 @@
 --                     (the FLOOR is pinned: the same order, but the bottom of your half sits on the anchor
 --                     and rows that come push the seam and the enemy's half up - nothing of yours ever
 --                     reaches below the line you set)
+--             reverse false | true: the block the other way up - yours stack UP from the seam, your cast
+--                     bar on top, the enemy's hang below. Independent of grow: what is pinned is one
+--                     question, which way the picture reads is another
 --             anchor  LEFT | CENTER | RIGHT: which point of the seam is pinned to the screen - and
 --                     how bars of different widths line up
 --             fade    bars fade in and out instead of popping
@@ -57,7 +60,7 @@ local BAR_OVERRIDES = {
 
     RG = { after = 10 }, -- a melee class that threw something: keep it up for a while
 }
-local BLOCK_DEFAULTS = { anchor = "CENTER", fade = true, snapCenter = true, grow = "down" }
+local BLOCK_DEFAULTS = { anchor = "CENTER", fade = true, snapCenter = true, grow = "down", reverse = false }
 local LIMITS = { after = { 0, 60 }, width = { 60, 600 }, height = { 6, 60 } }
 
 local ALIASES = {
@@ -233,7 +236,7 @@ function BarSettings:SetBlock(field, value)
         if not isAnchor[value] then
             return false
         end
-    elseif field == "fade" or field == "snapCenter" then
+    elseif field == "fade" or field == "snapCenter" or field == "reverse" then
         value = value and true or false
     elseif field == "grow" then
         value = string.lower(tostring(value or ""))
@@ -351,6 +354,14 @@ ns:RegisterCommand("fade", "'on' (default) or 'off': bars fade in and out instea
         BarSettings:SetBlock("fade", mode == "on")
     end
     ns:Print("fading:", BarSettings:GetBlock("fade") and "on" or "off")
+end)
+
+ns:RegisterCommand("reverse", "'off' (default) or 'on': the block the other way up - your bars stack up from the seam with your cast bar on top, the enemy's hang below", function(rest)
+    local mode = string.lower(rest or "")
+    if mode == "on" or mode == "off" then
+        BarSettings:SetBlock("reverse", mode == "on")
+    end
+    ns:Print("reverse:", BarSettings:GetBlock("reverse") and "on - yours stack up from the seam, the enemy's hang below" or "off - the enemy's above the seam, yours below")
 end)
 
 ns:RegisterCommand("anchor", "'left', 'center' or 'right': which point of the seam is pinned, and how bars of different widths line up", function(rest)

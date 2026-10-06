@@ -408,6 +408,46 @@ scenario("'/fct grow up' pins the floor: the same picture, but the bottom of you
     equal(point, "BOTTOMLEFT"); equal(relativePoint, "BOTTOMLEFT", "the floor is pinned again after a reload")
 end)
 
+scenario("'/fct reverse on' turns the picture the other way up - yours stack up from the seam, cast bar on top, the enemy's hang below - with either pinning", function()
+    local ns = start(nil, function(s) s.attackSpeed.player = { 2.6, 1.8, nil } end)
+    local bars, block = ns.Bars.bars, AKForeverCombatTimersFrame
+    ns.Bars:Update()
+    local function y(bar) local _, _, _, _, offset = bar:GetPoint(1); return offset end
+    local function anchoring(frame) local point, relativeTo, relativePoint = frame:GetPoint(1); return point, relativeTo, relativePoint end
+    SlashCmdList.AKFOREVERCOMBATTIMERS("reverse on")
+    check(table.concat(Mock.printed, "\n"):find("reverse: on", 1, true), "said so")
+    ns.Bars:Update()
+    equal(bars.MH:GetParent(), block.upper, "yours are above the seam"); equal(bars.TCAST:GetParent(), block.lower, "the enemy's below")
+    equal((bars.MH:GetPoint(1)), "BOTTOM"); equal(y(bars.MH), 0, "your first bar sits on the seam")
+    check(y(bars.OH) > y(bars.MH) and y(bars.CAST) > y(bars.OH), "yours stack UP, the cast bar on top")
+    equal((bars.ENEMY:GetPoint(1)), "TOP"); equal(y(bars.ENEMY), 0, "the enemy's last bar hangs directly under the seam")
+    check(y(bars.TCAST) < y(bars.ENEMY), "the enemy's hang DOWN")
+    local point, relativeTo, relativePoint = anchoring(block.lower)
+    equal(point, "TOPLEFT"); equal(relativePoint, "BOTTOMLEFT", "the seam is still what is pinned")
+    equal(ns.BarSettings:Move("ENEMY", 1), false, "a bar still never crosses the seam")
+    -- reversed AND the floor pinned: the enemy's half stands on the anchor, yours ride on top of it
+    SlashCmdList.AKFOREVERCOMBATTIMERS("grow up")
+    ns.Bars:Update()
+    point, relativeTo, relativePoint = anchoring(block.lower)
+    equal(point, "BOTTOMLEFT"); equal(relativeTo, block); equal(relativePoint, "BOTTOMLEFT", "the lower half stands on the floor")
+    equal(bars.TCAST:GetParent(), block.lower, "and the lower half is the enemy's"); equal(bars.MH:GetParent(), block.upper)
+    point, relativeTo, relativePoint = anchoring(block.upper)
+    equal(relativeTo, block.lower); equal(relativePoint, "TOPLEFT", "yours ride on top")
+    -- off again: the plain picture, the floor still pinned
+    SlashCmdList.AKFOREVERCOMBATTIMERS("reverse off")
+    ns.Bars:Update()
+    equal(bars.MH:GetParent(), block.lower); equal(bars.TCAST:GetParent(), block.upper)
+    equal(select(3, anchoring(block.lower)), "BOTTOMLEFT", "grow up untouched by the reverse switch")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("reverse")
+    check(table.concat(Mock.printed, "\n"):find("reverse: off", 1, true), "no argument: the state")
+    -- the setting is the character's and comes back
+    SlashCmdList.AKFOREVERCOMBATTIMERS("reverse on")
+    local db = AKForeverCombatTimersDB
+    ns = start({ db = db }, function(s) s.attackSpeed.player = { 2.6, 1.8, nil } end)
+    ns.Bars:Update()
+    equal(ns.BarSettings:GetBlock("reverse"), true); equal(ns.Bars.bars.MH:GetParent(), AKForeverCombatTimersFrame.upper)
+end)
+
 scenario("an irregular rhythm (several attackers) lowers confidence and dims the bar", function()
     local ns, state = start()
     boar(state)

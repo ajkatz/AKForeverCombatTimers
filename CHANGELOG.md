@@ -6,7 +6,9 @@
   cast bar on top - which kept your bars above a line but not the picture. Now the order is the same as
   ever, cast bar lowest; what changes is what is pinned: the bottom of your half sits where you put the
   block, and rows that come and go push the seam and the enemy's half up. Nothing of yours ever reaches
-  below that line.
+  below that line. The mirror is its own switch now: **`/fct reverse on`** turns the picture the other way
+  up - yours stack up from the seam, cast bar on top, the enemy's hang below - with either pinning. Both
+  have a button in the settings window.
 - **Bane of Agony gets its bar.** Forever calls Curse of Agony "Bane of Agony" (and Curse of Doom "Bane
   of Doom"); the warlock's default DoTs and the duration table use the new name, and a saved list that
   still says "Curse of Agony" is read as the new one.

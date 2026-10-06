@@ -10,9 +10,11 @@
 --          your cast
 --
 -- ... or pinned by its FLOOR ('/fct grow up'): the same picture, the same order, but what you position is
--- the bottom of your half. Rows that come and go push the seam and the enemy's half up; nothing of yours
--- ever reaches below the line you set. (A first version mirrored the block instead - the cast bar on top -
--- which kept the floor too, but not the picture.)
+-- the bottom of the block. Rows that come and go push the seam and the upper half up; nothing ever
+-- reaches below the line you set.
+--
+-- ... and, either way, the picture can be REVERSED ('/fct reverse on'): yours stack up from the seam, your
+-- cast bar on top, and the enemy's hang below it - the block the other way up.
 --
 -- What each bar does is BarSettings' business (mode always / when used / never, seconds to linger,
 -- width, height, order inside its half). A bar that is switched off, or does not apply to the
@@ -490,8 +492,9 @@ function Bars:Layout(now, force)
     lastLayoutAt = now
     local order = Settings:GetOrder()
     local anchor = Settings:GetBlock("anchor")
-    local floor = Settings:GetBlock("grow") == "up" -- the bottom of your half is what is pinned, not the seam
-    local parts = { anchor .. (floor and " up" or " down") }
+    local floor = Settings:GetBlock("grow") == "up"      -- the bottom of the block is what is pinned, not the seam
+    local reversed = Settings:GetBlock("reverse") == true -- yours above the seam, the enemy's below
+    local parts = { anchor .. (floor and " up" or " down") .. (reversed and " reversed" or "") }
     for index, key in ipairs(order) do
         local bar = bars[key]
         bar.slotted = Settings:GetMode(key) ~= "never" and applies(key, now)
@@ -523,7 +526,7 @@ function Bars:Layout(now, force)
     local function place(bar, container, edge, offset)
         for _, frame in ipairs({ bar, bar.ghost }) do
             if frame:GetParent() ~= container then
-                frame:SetParent(container)
+                frame:SetParent(container) -- (reversing the block moves a half to the other side of the seam)
             end
             frame:ClearAllPoints()
             if anchor == "LEFT" then
@@ -535,23 +538,39 @@ function Bars:Layout(now, force)
             end
         end
     end
-    -- the halves keep their order whatever is pinned: yours hangs under the seam (its first bar directly
-    -- under it), the enemy's stacks above (its LAST bar on the seam)
+    -- the halves from the seam outward, whatever is pinned. Plain: yours below the seam (your first bar
+    -- directly under it), the enemy's above (its LAST bar on the seam). Reversed: the enemy's below (last
+    -- bar directly under the seam), yours above (first bar on it) - the block the other way up.
+    local below, above = {}, {}
+    if reversed then
+        for index = #halves.enemy, 1, -1 do
+            below[#below + 1] = halves.enemy[index]
+        end
+        for _, bar in ipairs(halves.own) do
+            above[#above + 1] = bar
+        end
+    else
+        for _, bar in ipairs(halves.own) do
+            below[#below + 1] = bar
+        end
+        for index = #halves.enemy, 1, -1 do
+            above[#above + 1] = halves.enemy[index]
+        end
+    end
     local down = 0
-    for _, bar in ipairs(halves.own) do
+    for _, bar in ipairs(below) do
         place(bar, lower, "TOP", -down)
         down = down + bar.height + GAP
     end
     local up = 0
-    for index = #halves.enemy, 1, -1 do
-        local bar = halves.enemy[index]
+    for _, bar in ipairs(above) do
         place(bar, upper, "BOTTOM", up)
         up = up + bar.height + GAP
     end
     lower:SetHeight(math.max(1, down - GAP + PAD))
     upper:SetHeight(math.max(1, up - GAP + PAD))
-    -- what is pinned to the anchor: the seam (both halves hang off the root), or the floor (your half
-    -- stands on the root and the enemy's rides on top of yours, so every row that comes pushes upward)
+    -- what is pinned to the anchor: the seam (both halves hang off the root), or the floor (the lower half
+    -- stands on the root and the upper rides on top of it, so every row that comes pushes upward)
     lower:ClearAllPoints()
     upper:ClearAllPoints()
     if floor then
