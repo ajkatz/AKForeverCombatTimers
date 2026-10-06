@@ -43,20 +43,27 @@ local COMBO_SECONDS = {
     ["rip"] = { 12, 12, 12, 12, 12 },
 }
 
--- Seconds a DoT runs, by spell name in lower case. Ranks of the same spell run for the same time in this
--- era, so a name is enough. Only spells whose duration is FIXED belong here: anything that varies with
--- combo points or talents is left out on purpose and waits to be taught by a readable aura, because a
--- confident wrong number on a timer is worse than no bar.
+-- Seconds a DoT runs, by spell name in lower case: the length of its top ranks (two spells run for less
+-- at low ranks, see RANK_SECONDS). Only spells whose duration is FIXED belong here: anything that varies
+-- with combo points or talents is left out on purpose and waits to be taught by a readable aura, because
+-- a confident wrong number on a timer is worse than no bar.
 local DURATIONS = {
     ["flame shock"] = 12,
     ["serpent sting"] = 15,
     ["shadow word: pain"] = 18,
-    ["corruption"] = 12,      -- Forever: 12 seconds untalented (Classic ran 18) - the user's measurement, 2026-10-05
+    ["corruption"] = 18,      -- ranks 3 and up; ranks 1 and 2 run for less, see RANK_SECONDS
     ["immolate"] = 15,
     ["bane of agony"] = 24,   -- Forever renamed Curse of Agony (and Curse of Doom: Bane of Doom)
     ["curse of agony"] = 24,
     ["moonfire"] = 12,
-    ["rend"] = 21,
+    ["rend"] = 21,            -- ranks 5 and up; ranks 1 to 4 run for less, see RANK_SECONDS
+}
+
+-- The low ranks that run for less than the name says, by spell id, since the name is the same: Classic's
+-- lengths, which Forever keeps (Corruption measured in game at 12 and 15 seconds, 2026-10-06).
+local RANK_SECONDS = {
+    [172] = 12, [6222] = 15,                          -- Corruption ranks 1 and 2 (18 from rank 3)
+    [772] = 9, [6546] = 12, [6547] = 15, [6548] = 18, -- Rend ranks 1 to 4 (21 from rank 5)
 }
 
 local KEEP_ENEMIES = 12   -- mobs worth remembering at once; a pull, not a raid night
@@ -64,7 +71,9 @@ local GONE_AFTER = 60     -- an enemy nothing has happened to for this long is f
 
 local applied = {}        -- [guid] = { [spell] = entry }
 local appliedCount = 0
-local learned = {}        -- [spell] = seconds, taught by a readable aura
+local learned = {}        -- [spell id] = seconds, taught by a readable aura - per id, since the ranks of Corruption and
+                          -- Rend run for different times; [name] = seconds only when the aura carried no id
+local learnedNames = {}   -- [spell id] = the name in lower case, for the report
 -- [spell] = { [seconds] = times seen }. Only for the combo-point spells, whose per-point table is the
 -- one thing in here that was believed rather than measured. The durations a real aura hands over ARE
 -- that table, gathered a cast at a time.
@@ -166,9 +175,12 @@ end
 ------------------------------------------------------------------------
 -- How long it runs: what an aura taught us, else what we know, else nothing
 ------------------------------------------------------------------------
-local function durationFor(spell)
+local function durationFor(spell, spellID)
     if COMBO_SECONDS[spell] then
         return nil -- bought with points nobody can read: no fixed answer exists to give
+    end
+    if spellID then
+        return learned[spellID] or RANK_SECONDS[spellID] or learned[spell] or DURATIONS[spell]
     end
     return learned[spell] or DURATIONS[spell]
 end
@@ -227,13 +239,16 @@ local function readAura(aura)
         return nil
     end
     local duration, expires = aura.duration, aura.expirationTime
-    local icon, name = aura.icon, aura.name
+    local icon, name, spellID = aura.icon, aura.name, aura.spellId
     if ns.AnySecret(duration, expires, icon, name)
         or type(duration) ~= "number" or type(expires) ~= "number" or duration <= 0
         or type(name) ~= "string" then
         return nil
     end
-    return { name = name, total = duration, endTime = expires, texture = icon }
+    if ns.IsSecret(spellID) or type(spellID) ~= "number" then
+        spellID = nil
+    end
+    return { name = name, total = duration, endTime = expires, texture = icon, spellID = spellID }
 end
 
 -- One answer from the client, or nil when the call failed, the function is missing, or the answer is a
@@ -310,7 +325,10 @@ local function readFromTarget(unit)
                 -- the truth, and usually a lesson too - but not for a finisher, whose next cast may be
                 -- bought with fewer points and run for less
                 if not COMBO_SECONDS[spell] then
-                    learned[spell] = read.total
+                    learned[read.spellID or spell] = read.total
+                    if read.spellID then
+                        learnedNames[read.spellID] = spell
+                    end
                 else
                     -- ... though it is still worth writing down, because the set of durations this spell
                     -- is ever seen to have is exactly the table we guessed at
@@ -454,7 +472,7 @@ local function onCast(_, _, _, spellID)
         return
     end
 
-    local seconds = durationFor(spell)
+    local seconds = durationFor(spell, spellID)
     if not seconds then
         return -- nothing has taught us how long this one runs; a guessed bar would be worse than none
     end
@@ -491,7 +509,7 @@ function Dots:Report()
             timers = timers + 1
         end
     end
-    return { enemies = enemies, timers = timers, learned = learned, observed = observed,
+    return { enemies = enemies, timers = timers, learned = learned, learnedNames = learnedNames, observed = observed,
         dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
         expected = COMBO_SECONDS, tracked = self:GetTracked() }
 end
@@ -533,6 +551,13 @@ ns:RegisterCommand("dot", "which of your damage-over-time spells get a bar: '/fc
     for index, spellName in ipairs(tracked) do
         local spell = string.lower(spellName)
         local seconds = learned[spell] or DURATIONS[spell]
+        local ranks = {}
+        for id, length in pairs(learned) do
+            if learnedNames[id] == spell then
+                ranks[#ranks + 1] = string.format("%.4g s (spell %d)", length, id)
+            end
+        end
+        table.sort(ranks)
         local how
         if COMBO_SECONDS[spell] then
             local list = COMBO_SECONDS[spell]
@@ -546,7 +571,10 @@ ns:RegisterCommand("dot", "which of your damage-over-time spells get a bar: '/fc
                 #lengths > 0 and table.concat(lengths, ", ") or "nothing yet - cast it out of combat")
         elseif seconds then
             how = string.format("%.4g seconds", seconds)
-                .. (learned[spell] and " (seen on a real aura)" or " (from the table)")
+                .. (learned[spell] and " (seen on a real aura)" or " (from the table, the top ranks)")
+            if #ranks > 0 then
+                how = how .. "; seen on real auras: " .. table.concat(ranks, ", ")
+            end
         else
             how = "|cffffd100no duration known yet|r - cast it once out of combat and the aura will teach us"
         end

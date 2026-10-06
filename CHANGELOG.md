@@ -5,8 +5,10 @@
 - **Bane of Agony gets its bar.** Forever calls Curse of Agony "Bane of Agony" (and Curse of Doom "Bane
   of Doom"); the warlock's default DoTs and the duration table use the new name, and a saved list that
   still says "Curse of Agony" is read as the new one.
-- **Corruption runs 12 seconds** untalented on Forever (Classic's 18 was in the table); a readable aura
-  still corrects the clock when talents stretch it.
+- **Corruption and Rend run for less at low ranks.** Corruption lasts 12 seconds at rank 1 and 15 at
+  rank 2 (both measured on Forever), 18 from rank 3; Rend 9, 12, 15 and 18 seconds for ranks 1 to 4, 21
+  from rank 5. The table used to hold one length per name. A readable aura still teaches the clock, now
+  per rank.
 
 ## 0.5.1
 

@@ -1822,10 +1822,31 @@ scenario("a warlock's Bane of Agony - Forever's name for Curse of Agony - gets i
     local dot = ns.Dots:Get(3, Mock.now)
     check(dot, "the third slot has the Bane")
     equal(dot.name, "Bane of Agony"); equal(dot.total, 24, "it runs as long as the curse did")
-    -- Corruption runs twelve seconds untalented on Forever, not Classic's eighteen
+    -- Corruption runs twelve seconds at rank 1, fifteen at rank 2 (measured on Forever) and eighteen from rank 3
     Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C", CORRUPTION)
     local corruption = ns.Dots:Get(1, Mock.now)
-    check(corruption, "Corruption has the first slot"); equal(corruption.total, 12, "twelve seconds on Forever")
+    check(corruption, "Corruption has the first slot"); equal(corruption.total, 12, "rank 1: twelve seconds")
+    state.spellNames[6222], state.spellNames[6223], state.spellNames[25311] = "Corruption", "Corruption", "Corruption"
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C2", 6222)
+    equal(ns.Dots:Get(1, Mock.now).total, 15, "rank 2: fifteen")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C3", 6223)
+    equal(ns.Dots:Get(1, Mock.now).total, 18, "rank 3: eighteen")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C7", 25311)
+    equal(ns.Dots:Get(1, Mock.now).total, 18, "rank 7: eighteen")
+    -- a warrior: Rend grows from nine seconds at rank 1 to twenty-one from rank 5
+    local warrior, wstate = start({ class = "WARRIOR", spellNames = { [772] = "Rend", [6546] = "Rend", [6548] = "Rend", [11572] = "Rend" } })
+    warrior.cdb.dots = { "Rend" }
+    wstate.guids.target = "Creature-0-0-0-0-222-B"
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-R1", 772)
+    equal(warrior.Dots:Get(1, Mock.now).total, 9, "Rend rank 1: nine")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-R2", 6546)
+    equal(warrior.Dots:Get(1, Mock.now).total, 12, "Rend rank 2: twelve")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-R4", 6548)
+    equal(warrior.Dots:Get(1, Mock.now).total, 18, "Rend rank 4: eighteen")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-R5", 11572)
+    equal(warrior.Dots:Get(1, Mock.now).total, 21, "Rend rank 5: twenty-one")
+    ns, state = start({ class = "WARLOCK", spellNames = { [BANE] = "Bane of Agony", [CORRUPTION] = "Corruption" } })
+    state.guids.target = "Creature-0-0-0-0-111-A"
     -- a list saved under the old name
     ns.cdb.dots = { "Corruption", "Curse of Agony" }
     equal(ns.Dots:GetTracked()[2], "Bane of Agony")
