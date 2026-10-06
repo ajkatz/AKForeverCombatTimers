@@ -1762,11 +1762,48 @@ scenario("a DoT that has run its course leaves the bar", function()
     equal(ns.Dots:Get(1, Mock.now), nil, "and off it again")
 end)
 
-scenario("an enemy the client will not name is not guessed at", function()
+scenario("an enemy whose GUID the client keeps secret still gets its bars: a stand-in key for this target, let go when the target changes, grown into the GUID when it can be read again", function()
     local ns, state = shaman()
-    state.secretGUIDs = true -- no readable GUID: nothing to file the DoT under
+    state.units.target = { id = "boar", name = "Boar", hostile = true }
+    state.secretGUIDs = true -- in a fight the client gives no readable GUID (measured 2026-10-06, build 70235)
     castFlameShock()
-    equal(ns.Dots:Get(1, Mock.now), nil, "no bar rather than a bar against the wrong mob")
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "the bar is there all the same"); equal(dot.total, 12)
+    equal(ns.Dots:Report().targetKey, "stand-in"); equal(ns.Dots:Report().standIns, 1)
+    -- another target: a fresh stand-in, nothing shown for it until something is cast on it
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    equal(ns.Dots:Get(1, Mock.now), nil, "a new target, nothing cast on it yet")
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now), "cast on the new one: its bar")
+    equal(ns.Dots:Report().standIns, 2)
+    -- the fight ends and the GUID can be read: the stand-in grows into it, the bar stays
+    state.secretGUIDs = false
+    state.guids.target = "Creature-0-0-0-0-7-B"
+    check(ns.Dots:Get(1, Mock.now), "the bar survives the key growing up")
+    equal(ns.Dots:Report().targetKey, "guid")
+    -- no target at all: nothing is filed, and the cast says so in the log
+    state.units.target = nil
+    state.guids.target = nil
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    castFlameShock()
+    equal(ns.Dots:Get(1, Mock.now), nil)
+    check(ns.Dots:Report().skipped >= 1, "the skipped cast is counted")
+    equal(#Mock.errors, 0)
+end)
+
+scenario("a pull's DoT and the fight's DoT share one bucket: the key is taken with the target and kept while the GUID turns secret", function()
+    local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
+    state.units.target = { id = "kobold", name = "Kobold", hostile = true }
+    state.guids.target = "Creature-0-0-0-0-6-K"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-P", 172) -- the pull, out of combat
+    Mock.setCombat(true)
+    state.secretGUIDs = true -- in the fight the client keeps the GUID to itself
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-F", 348)
+    check(ns.Dots:Get(1, Mock.now) and ns.Dots:Get(2, Mock.now), "both bars, one target")
+    equal(ns.Dots:Report().targetKey, "guid", "the key taken at the pull holds")
+    Mock.setCombat(false)
+    state.secretGUIDs = false
     equal(#Mock.errors, 0)
 end)
 

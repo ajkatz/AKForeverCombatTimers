@@ -5,6 +5,12 @@
 - **Bane of Agony gets its bar.** Forever calls Curse of Agony "Bane of Agony" (and Curse of Doom "Bane
   of Doom"); the warlock's default DoTs and the duration table use the new name, and a saved list that
   still says "Curse of Agony" is read as the new one.
+- **DoT bars in a fight again.** Client build 70235 (Oct 5 2026) keeps a target's identity secret in a
+  fight, and the bars, which filed every DoT under it, went empty exactly where they are wanted. The key is
+  now taken when the target is taken and kept until it changes - the identity if the client gives it, a
+  stand-in for "this target" if not - so a pull's Corruption and the fight's Immolate share one set of
+  bars. A mob you tab back to in a fight gets a fresh stand-in; its bars return with the next cast on it.
+  `/fct diag` says whether the key was the identity or a stand-in, and why a cast gave no bar.
 - **Corruption and Rend run for less at low ranks.** Corruption lasts 12 seconds at rank 1 and 15 at
   rank 2 (both measured on Forever), 18 from rank 3; Rend 9, 12, 15 and 18 seconds for ranks 1 to 4, 21
   from rank 5. The table used to hold one length per name. A readable aura still teaches the clock, now

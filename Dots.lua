@@ -69,8 +69,10 @@ local RANK_SECONDS = {
 local KEEP_ENEMIES = 12   -- mobs worth remembering at once; a pull, not a raid night
 local GONE_AFTER = 60     -- an enemy nothing has happened to for this long is forgotten
 
-local applied = {}        -- [guid] = { [spell] = entry }
+local applied = {}        -- [key] = { [spell] = entry }, the key a target's GUID or a stand-in for it (see retarget)
 local appliedCount = 0
+local targetKey           -- what the current target's DoTs are filed under; nil without a target
+local standIns = 0        -- stand-in keys handed out so far
 local learned = {}        -- [spell id] = seconds, taught by a readable aura - per id, since the ranks of Corruption and
                           -- Rend run for different times; [name] = seconds only when the aura carried no id
 local learnedNames = {}   -- [spell id] = the name in lower case, for the report
@@ -81,7 +83,7 @@ local observed = {}
 local serial = 0
 
 Dots.samples = {}         -- for /fct diag
-Dots.stats = { droppedDead = 0, droppedGone = 0 }
+Dots.stats = { droppedDead = 0, droppedGone = 0, standIns = 0, skipped = 0 }
 local MAX_SAMPLES = 12
 
 local function now()
@@ -192,6 +194,16 @@ local function note(sample)
     end
 end
 
+-- a tracked spell was cast and no bar came of it: why, in the log, for the first dozen times
+local skippedLogged = 0
+local function skip(why, spellID)
+    Dots.stats.skipped = (Dots.stats.skipped or 0) + 1
+    if skippedLogged < 12 then
+        skippedLogged = skippedLogged + 1
+        ns:Log("dot_skipped", { why = why, spell = spellID })
+    end
+end
+
 -- A DoT of ours landed, and we know when it must end
 local function start(guid, spell, name, texture, at, seconds, source)
     local spells = bucket(guid)
@@ -265,6 +277,44 @@ local function readable(fn, ...)
     return value
 end
 
+-- WHAT THE TARGET'S DOTS ARE FILED UNDER. Its GUID when the client gives it - and in a fight the client
+-- does not: measured 2026-10-06 on build 70235, UnitGUID("target") is a secret there, and every DoT cast
+-- in a fight went nowhere (a "do not guess" that left the bars empty exactly where they are wanted). So
+-- the key is taken when the target is TAKEN and kept until the target changes: the GUID if it is readable
+-- then, else a stand-in that means "this target, whoever it is". A pull's Corruption (GUID in hand) and the
+-- fight's Immolate (GUID secret) land in one bucket because the key did not move. What a stand-in cannot
+-- do is recognise a mob you tab back to in a fight: that gets a fresh stand-in, and its bars return with
+-- the next cast on it.
+local function retarget()
+    local guid = guidOf("target")
+    if guid then
+        targetKey = guid
+        return
+    end
+    if readable(UnitExists, "target") == false then
+        targetKey = nil -- no target at all
+        return
+    end
+    standIns = standIns + 1
+    targetKey = "target#" .. standIns
+    Dots.stats.standIns = (Dots.stats.standIns or 0) + 1
+end
+
+-- Before the key is used: should the client now give a GUID that is not the key, the key follows it. A
+-- stand-in whose target can be read again (the fight is over) grows into the GUID, bars and all, so a
+-- mob can be tabbed back to out of a fight; a GUID that simply differs is a target change the event has
+-- not told us of yet.
+local function syncTarget()
+    local guid = guidOf("target")
+    if not guid or guid == targetKey then
+        return
+    end
+    if targetKey and string.find(targetKey, "^target#") and applied[targetKey] and not applied[guid] then
+        applied[guid], applied[targetKey] = applied[targetKey], nil
+    end
+    targetKey = guid
+end
+
 -- A corpse stays targeted; its DoTs are over. UnitIsDeadOrGhost carries no secret flag in the API docs,
 -- and the read is guarded anyway: an unreadable answer is "not known to be dead".
 local function isDead(unit)
@@ -275,9 +325,9 @@ local function dropIfDead(unit)
     if not isDead(unit) then
         return false
     end
-    local guid = guidOf(unit)
-    if guid and applied[guid] then
-        forget(guid)
+    syncTarget()
+    if targetKey and applied[targetKey] then
+        forget(targetKey)
         Dots.stats.droppedDead = (Dots.stats.droppedDead or 0) + 1
     end
     return true
@@ -303,7 +353,8 @@ local function readFromTarget(unit)
     if type(auras) ~= "table" or type(auras.GetAuraDataByIndex) ~= "function" then
         return
     end
-    local guid = guidOf(unit)
+    syncTarget()
+    local guid = targetKey
     if not guid then
         return
     end
@@ -381,7 +432,8 @@ function Dots:Get(slot, at)
         return nil
     end
     at = at or now()
-    local guid = guidOf("target")
+    syncTarget()
+    local guid = targetKey
     if not guid then
         return nil
     end
@@ -450,14 +502,20 @@ local function onCast(_, _, _, spellID)
     end
     local name = nameOf(spellID)
     if not name then
+        skip("the client gave no name for the spell", spellID)
         return
     end
     local spell = string.lower(name)
     if not Dots:IsTracked(spell) then
         return
     end
-    local guid = guidOf("target")
+    syncTarget()
+    if not targetKey then
+        retarget() -- a target taken before the addon was listening
+    end
+    local guid = targetKey
     if not guid then
+        skip("no target", spellID)
         return
     end
 
@@ -474,6 +532,7 @@ local function onCast(_, _, _, spellID)
 
     local seconds = durationFor(spell, spellID)
     if not seconds then
+        skip("no duration known", spellID)
         return -- nothing has taught us how long this one runs; a guessed bar would be worse than none
     end
     start(guid, spell, name, textureOf(spellID), now(), seconds, "cast")
@@ -481,9 +540,13 @@ end
 
 ns:OnPlayerUnit("UNIT_SPELLCAST_SUCCEEDED", onCast) -- the client filters it to you
 ns:On("PLAYER_TARGET_CHANGED", function()
+    retarget()
     if not dropIfDead("target") then
         readFromTarget("target")
     end
+end)
+ns:On("PLAYER_ENTERING_WORLD", function()
+    retarget()
 end)
 -- UNIT_HEALTH fires when the target dies (the value is secret; the event is not), UNIT_FLAGS too
 ns:On("UNIT_HEALTH", function(_, unit) if unit == "target" then dropIfDead("target") end end)
@@ -510,6 +573,8 @@ function Dots:Report()
         end
     end
     return { enemies = enemies, timers = timers, learned = learned, learnedNames = learnedNames, observed = observed,
+        targetKey = targetKey and (string.find(targetKey, "^target#") and "stand-in" or "guid") or "none",
+        standIns = self.stats.standIns or 0, skipped = self.stats.skipped or 0,
         dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
         expected = COMBO_SECONDS, tracked = self:GetTracked() }
 end
