@@ -2,6 +2,11 @@
 
 ## 0.5.2
 
+- **`/fct grow up` pins the floor, not a mirror.** The 0.5.1 version turned the block upside down - your
+  cast bar on top - which kept your bars above a line but not the picture. Now the order is the same as
+  ever, cast bar lowest; what changes is what is pinned: the bottom of your half sits where you put the
+  block, and rows that come and go push the seam and the enemy's half up. Nothing of yours ever reaches
+  below that line.
 - **Bane of Agony gets its bar.** Forever calls Curse of Agony "Bane of Agony" (and Curse of Doom "Bane
   of Doom"); the warlock's default DoTs and the duration table use the new name, and a saved list that
   still says "Curse of Agony" is read as the new one.

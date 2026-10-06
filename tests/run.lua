@@ -362,36 +362,50 @@ scenario("only melee swings on the watched unit count", function()
     equal(#ns.Incoming.rawSamples, 6, "every event is sampled for the experiment")
 end)
 
-scenario("'/fct grow up' mirrors the block: your bars stack up from the seam, the enemy's hang below it - the seam never moves", function()
+scenario("'/fct grow up' pins the floor: the same picture, but the bottom of your half sits on the anchor and the block grows up from there", function()
     local ns = start(nil, function(s) s.attackSpeed.player = { 2.6, 1.8, nil } end)
     local bars, block = ns.Bars.bars, AKForeverCombatTimersFrame
     ns.Bars:Update()
     local function y(bar) local _, _, _, _, offset = bar:GetPoint(1); return offset end
+    local function anchoring(frame) local point, relativeTo, relativePoint = frame:GetPoint(1); return point, relativeTo, relativePoint end
     local seamX, seamY = select(4, block:GetPoint(1)), select(5, block:GetPoint(1))
+    local point, relativeTo, relativePoint = anchoring(block.lower)
+    equal(point, "TOPLEFT"); equal(relativeTo, block); equal(relativePoint, "BOTTOMLEFT", "by default your half hangs under the seam")
+    point, relativeTo, relativePoint = anchoring(block.upper)
+    equal(point, "BOTTOMLEFT"); equal(relativeTo, block); equal(relativePoint, "TOPLEFT", "and the enemy's stands on it")
+
     SlashCmdList.AKFOREVERCOMBATTIMERS("grow up")
     check(table.concat(Mock.printed, "\n"):find("grow: up", 1, true), "said so")
     ns.Bars:Update()
-    equal(bars.MH:GetParent(), block.upper, "yours are above the seam now"); equal(bars.TCAST:GetParent(), block.lower, "the enemy's below")
-    equal((bars.MH:GetPoint(1)), "BOTTOM"); equal(y(bars.MH), 0, "your first bar sits on the seam")
-    check(y(bars.OH) > y(bars.MH) and y(bars.CAST) > y(bars.OH), "yours stack UP")
-    equal((bars.ENEMY:GetPoint(1)), "TOP"); equal(y(bars.ENEMY), 0, "the enemy's last bar hangs directly under the seam")
-    check(y(bars.TCAST) < y(bars.ENEMY), "the enemy's hang DOWN")
-    equal(select(4, block:GetPoint(1)), seamX); equal(select(5, block:GetPoint(1)), seamY, "the seam is where it was")
+    -- the same picture: yours under the seam, first bar directly under it, the cast bar lowest; the enemy's above
+    equal(bars.MH:GetParent(), block.lower); equal(bars.TCAST:GetParent(), block.upper)
+    equal((bars.MH:GetPoint(1)), "TOP"); equal(y(bars.MH), 0, "your first bar hangs directly under the seam")
+    check(y(bars.OH) < y(bars.MH) and y(bars.CAST) < y(bars.OH), "yours still grow DOWN, the cast bar lowest")
+    equal((bars.ENEMY:GetPoint(1)), "BOTTOM"); equal(y(bars.ENEMY), 0); check(y(bars.TCAST) > y(bars.ENEMY), "the enemy's still stack UP")
+    -- what moved is the pinning: the bottom of your half sits on the anchor, the enemy's half rides on yours
+    point, relativeTo, relativePoint = anchoring(block.lower)
+    equal(point, "BOTTOMLEFT"); equal(relativeTo, block); equal(relativePoint, "BOTTOMLEFT", "your half stands on the floor")
+    point, relativeTo, relativePoint = anchoring(block.upper)
+    equal(point, "BOTTOMLEFT"); equal(relativeTo, block.lower); equal(relativePoint, "TOPLEFT", "the enemy's half rides on yours")
+    equal(select(4, block:GetPoint(1)), seamX); equal(select(5, block:GetPoint(1)), seamY, "the anchor is where it was")
     equal(ns.BarSettings:Move("ENEMY", 1), false, "a bar still never crosses the seam")
 
     SlashCmdList.AKFOREVERCOMBATTIMERS("grow sideways")
     check(table.concat(Mock.printed, "\n"):find("usage: /fct grow down | up", 1, true), "usage")
     SlashCmdList.AKFOREVERCOMBATTIMERS("grow down")
     ns.Bars:Update()
-    equal(bars.MH:GetParent(), block.lower); equal(y(bars.MH), 0, "back under the seam")
-    equal(bars.TCAST:GetParent(), block.upper)
+    point, relativeTo, relativePoint = anchoring(block.lower)
+    equal(point, "TOPLEFT"); equal(relativePoint, "BOTTOMLEFT", "back to the seam")
+    equal(bars.MH:GetParent(), block.lower); equal(y(bars.MH), 0)
 
     -- the setting is the character's and comes back
     SlashCmdList.AKFOREVERCOMBATTIMERS("grow up")
     local db = AKForeverCombatTimersDB
     ns = start({ db = db }, function(s) s.attackSpeed.player = { 2.6, 1.8, nil } end)
     ns.Bars:Update()
-    equal(ns.BarSettings:GetBlock("grow"), "up"); equal(ns.Bars.bars.MH:GetParent(), AKForeverCombatTimersFrame.upper)
+    equal(ns.BarSettings:GetBlock("grow"), "up")
+    point, relativeTo, relativePoint = anchoring(AKForeverCombatTimersFrame.lower)
+    equal(point, "BOTTOMLEFT"); equal(relativePoint, "BOTTOMLEFT", "the floor is pinned again after a reload")
 end)
 
 scenario("an irregular rhythm (several attackers) lowers confidence and dims the bar", function()

@@ -42,10 +42,11 @@ being timed / the buff is up. Being in combat is not "use".
 
 The block is positioned by its seam: `/fct anchor left|center|right` says which point of it is
 pinned (and lines up bars of different widths), `/fct center` centres it on the screen, and a block
-dropped within 24 px of the centre line snaps onto it (`/fct snap off`). **`/fct grow up`** turns the
-block the other way up: your bars stack *up* from the seam and the enemy's hang below it, so the seam
-is the floor of your bars and nothing of yours ever reaches further down - for a block that sits low
-on the screen. `/fct grow down` (the default) is the picture above.
+dropped within 24 px of the centre line snaps onto it (`/fct snap off`). **`/fct grow up`** pins the
+*floor* instead of the seam: the same picture, the same order, but the bottom of your bars sits where you
+put the block, and rows that come and go push the seam and the enemy's half up - nothing of yours ever
+reaches below that line. For a block that sits low on the screen. `/fct grow down` (the default) pins the
+seam, as in the picture above.
 
 Locking no longer decides what is visible. Unlocked only adds a small blue **`timers` tab** next to
 the seam (drag it to move the block, click it for the settings window), the seam as a hairline, and
