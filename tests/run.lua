@@ -1845,6 +1845,41 @@ scenario("an enemy whose GUID the client keeps secret still gets its bars: a sta
     equal(#Mock.errors, 0)
 end)
 
+scenario("a DoT with a cast time lands on the target it was begun on: switching targets before it finishes files it under the old one", function()
+    local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
+    state.units.target = { id = "kobold", name = "Kobold", hostile = true }
+    state.guids.target = "Creature-0-0-0-0-6-A"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    Mock.setCombat(true) -- in a fight: the aura walk is refused, so only the casts say what is on whom
+    Mock.fireUnit("UNIT_SPELLCAST_START", "player", "player", "Cast-A1", 172)
+    -- the target changes while the cast runs
+    state.guids.target = "Creature-0-0-0-0-6-B"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-A1", 172)
+    Mock.fireUnit("UNIT_SPELLCAST_STOP", "player", "player", "Cast-A1", 172)
+    equal(ns.Dots:Get(1, Mock.now), nil, "nothing on B: the Corruption went to A")
+    state.guids.target = "Creature-0-0-0-0-6-A"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot, "back on A: its Corruption"); equal(dot.total, 12)
+    -- an instant (no START) goes to the current target; a cast that fails leaves nothing behind
+    state.guids.target = "Creature-0-0-0-0-6-B"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    Mock.fireUnit("UNIT_SPELLCAST_START", "player", "player", "Cast-B1", 348)
+    Mock.fireUnit("UNIT_SPELLCAST_INTERRUPTED", "player", "player", "Cast-B1", 348)
+    Mock.fireUnit("UNIT_SPELLCAST_STOP", "player", "player", "Cast-B1", 348)
+    equal(ns.Dots:Get(2, Mock.now), nil, "an interrupted cast is no DoT")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-B2", 348) -- instant: no START before it
+    check(ns.Dots:Get(2, Mock.now), "the instant goes to the current target")
+    -- a cast begun and finished on the same target, the ordinary case
+    Mock.fireUnit("UNIT_SPELLCAST_START", "player", "player", "Cast-B3", 172)
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-B3", 172)
+    Mock.fireUnit("UNIT_SPELLCAST_STOP", "player", "player", "Cast-B3", 172)
+    check(ns.Dots:Get(1, Mock.now), "B has its Corruption")
+    Mock.setCombat(false)
+    equal(#Mock.errors, 0)
+end)
+
 scenario("a pull's DoT and the fight's DoT share one bucket: the key is taken with the target and kept while the GUID turns secret", function()
     local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
     state.units.target = { id = "kobold", name = "Kobold", hostile = true }

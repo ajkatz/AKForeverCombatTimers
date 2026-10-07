@@ -493,7 +493,37 @@ end
 
 -- You cast one of them. Your own casts are never secret, so this is the one thing that always works -
 -- in a fight as much as out of one, which is exactly where a DoT timer earns its place.
-local function onCast(_, _, _, spellID)
+-- A cast with a cast time lands on the target it was BEGUN on, whatever is targeted when it lands - so
+-- the key is taken at UNIT_SPELLCAST_START and used at the SUCCEEDED of the same cast (the cast GUID ties
+-- the two). An instant has no START and goes to the current target. Switching targets before a Corruption
+-- finished casting used to file it under the new target (seen 2026-10-06).
+local castsBegun = {} -- [castGUID] = the key of the target the cast was begun on
+
+local function onCastStart(_, _, castGUID, spellID)
+    if ns.IsSecret(castGUID) or type(castGUID) ~= "string" or ns.IsSecret(spellID) or type(spellID) ~= "number" then
+        return
+    end
+    if not Dots:HasTracked() then
+        return
+    end
+    local name = nameOf(spellID)
+    if not name or not Dots:IsTracked(string.lower(name)) then
+        return
+    end
+    syncTarget()
+    if not targetKey then
+        retarget()
+    end
+    castsBegun[castGUID] = targetKey or false
+end
+
+local function onCastEnd(_, _, castGUID)
+    if not ns.IsSecret(castGUID) and castGUID ~= nil then
+        castsBegun[castGUID] = nil
+    end
+end
+
+local function onCast(_, _, castGUID, spellID)
     if ns.IsSecret(spellID) or type(spellID) ~= "number" then
         return
     end
@@ -509,11 +539,20 @@ local function onCast(_, _, _, spellID)
     if not Dots:IsTracked(spell) then
         return
     end
-    syncTarget()
-    if not targetKey then
-        retarget() -- a target taken before the addon was listening
+    local begun = (not ns.IsSecret(castGUID) and type(castGUID) == "string") and castsBegun[castGUID] or nil
+    if castGUID ~= nil and not ns.IsSecret(castGUID) then
+        castsBegun[castGUID] = nil
     end
-    local guid = targetKey
+    local guid
+    if begun then
+        guid = begun -- the target the cast was begun on, whatever is targeted now
+    else
+        syncTarget()
+        if not targetKey then
+            retarget() -- a target taken before the addon was listening
+        end
+        guid = targetKey
+    end
     if not guid then
         skip("no target", spellID)
         return
@@ -539,6 +578,10 @@ local function onCast(_, _, _, spellID)
 end
 
 ns:OnPlayerUnit("UNIT_SPELLCAST_SUCCEEDED", onCast) -- the client filters it to you
+ns:OnPlayerUnit("UNIT_SPELLCAST_START", onCastStart)
+ns:OnPlayerUnit("UNIT_SPELLCAST_STOP", onCastEnd) -- (after a SUCCEEDED too: by then the key was taken and the entry is gone)
+ns:OnPlayerUnit("UNIT_SPELLCAST_FAILED", onCastEnd)
+ns:OnPlayerUnit("UNIT_SPELLCAST_INTERRUPTED", onCastEnd)
 ns:On("PLAYER_TARGET_CHANGED", function()
     retarget()
     if not dropIfDead("target") then

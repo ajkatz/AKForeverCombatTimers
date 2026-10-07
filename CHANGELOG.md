@@ -1,5 +1,12 @@
 # AKForeverCombatTimers
 
+## 0.5.3
+
+- **A DoT lands on the target it was begun on.** Switch targets while a Corruption or an Immolate is still
+  casting and the bar used to be filed under the new target, where no such DoT was. The target is taken
+  when the cast begins and kept for that cast, as the game does; an instant goes to the current target,
+  as before.
+
 ## 0.5.2
 
 - **`/fct grow up` pins the floor, not a mirror.** The 0.5.1 version turned the block upside down - your
