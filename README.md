@@ -59,6 +59,9 @@ faint corner marks on idle rows. Idle rows are click-through either way.
 | `/fct bar` | list; `/fct bar mh always`, `bar oh never`, `bar rg used 10`, `bar cast width 260`, `bar cast height 18`, `bar cast up` / `down`, `bar reset` |
 | `/fct order tcast enemy mh oh rg buff cast` | the whole order at once (each bar stays in its half) |
 | `/fct buff` | what the buff bar tracks: `buff add <spell name>`, `buff remove <spell name>`, `buff reset` (rogues start with Slice and Dice) |
+| `/fct plains` | the Plainsrunning readout: what it sees; `/fct plains <buff name>` if the buff is called otherwise |
+| `/fct reset` | the block back at its default place |
+| `/fct castlog`, `/fct casttime <spell>`, `/fct auras`, `/fct cpu` | for a bug report beside `/fct diag`: the last casts seen, whether a spell casts on this client, the buffs on you with every field, which addon is eating the frame |
 
 **The buff bar.** Out of combat an aura is plainly readable: bar, icon and a countdown. **In a fight an
 addon cannot touch your auras at all** - measured on this client (reports of 2026-09-20): a lookup by
