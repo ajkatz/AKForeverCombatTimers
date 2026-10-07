@@ -413,6 +413,7 @@ function Diagnostics:Collect()
         report.dots = { tracked = sanitize(dots.tracked), learned = sanitize(dots.learned),
             observedLengths = sanitize(dots.observed), assumedLengths = sanitize(dots.expected),
             enemiesRemembered = dots.enemies, timersRunning = dots.timers,
+            targetKey = dots.targetKey, standIns = dots.standIns, skipped = dots.skipped,
             recent = sanitize(ns.Dots.samples) }
     end
     -- The reactive windows: what has a bar, what is open right now, and the counts - in particular how

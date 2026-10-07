@@ -1,5 +1,13 @@
 # AKForeverCombatTimers
 
+## 0.5.4
+
+- **Tab away and back in a fight, and the bars are there.** The client keeps a target's identity secret in a
+  fight, and 0.5.3 answered with a stand-in that could not recognise a mob you came back to. Now a mob is
+  known by its nameplate while the plate is up (the frame outlives the switch), failing that by its name
+  and level, and only without either by a stand-in. A DoT cast at the pull is found again in the fight.
+  A plate that goes takes its bars with it. `/fct diag` says which of the four kinds of key was in use.
+
 ## 0.5.3
 
 - **A DoT lands on the target it was begun on.** Switch targets while a Corruption or an Immolate is still

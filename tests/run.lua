@@ -1818,7 +1818,7 @@ end)
 
 scenario("an enemy whose GUID the client keeps secret still gets its bars: a stand-in key for this target, let go when the target changes, grown into the GUID when it can be read again", function()
     local ns, state = shaman()
-    state.units.target = { id = "boar", name = "Boar", hostile = true }
+    state.units.target = { id = "boar", name = Mock.SECRET, hostile = true } -- not even the name to go by
     state.secretGUIDs = true -- in a fight the client gives no readable GUID (measured 2026-10-06, build 70235)
     castFlameShock()
     local dot = ns.Dots:Get(1, Mock.now)
@@ -1842,6 +1842,48 @@ scenario("an enemy whose GUID the client keeps secret still gets its bars: a sta
     castFlameShock()
     equal(ns.Dots:Get(1, Mock.now), nil)
     check(ns.Dots:Report().skipped >= 1, "the skipped cast is counted")
+    equal(#Mock.errors, 0)
+end)
+
+scenario("in a fight a target is known by its nameplate, or by its name: switch away and back and the bars are there; the pull's DoT follows into the fight; a plate that goes takes its bars", function()
+    local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
+    local plateA, plateB = { GetName = function() return "NamePlate1" end }, { GetName = function() return "NamePlate2" end }
+    local function target(name, plate, guid)
+        state.units.target = { id = name, name = name, hostile = true }
+        state.plates.target = plate
+        state.guids.target = guid
+        Mock.fire("PLAYER_TARGET_CHANGED")
+    end
+    -- the pull, out of combat: the GUID is readable and the plate is written down beside it
+    target("Kobold Miner", plateA, "Creature-0-0-0-0-6-A")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-A1", 172)
+    equal(ns.Dots:Report().targetKey, "guid")
+    -- the fight: GUIDs are secrets; another mob, then back to the first
+    Mock.setCombat(true)
+    state.secretGUIDs = true
+    target("Kobold Geomancer", plateB, "Creature-0-0-0-0-6-B")
+    equal(ns.Dots:Report().targetKey, "plate")
+    equal(ns.Dots:Get(1, Mock.now), nil, "nothing on the second mob")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-B1", 348)
+    check(ns.Dots:Get(2, Mock.now), "its Immolate")
+    target("Kobold Miner", plateA, "Creature-0-0-0-0-6-A")
+    check(ns.Dots:Get(1, Mock.now), "back on the first: the Corruption of the pull, found through its plate")
+    equal(ns.Dots:Get(2, Mock.now), nil, "and not the other one's Immolate")
+    -- the second mob's plate goes (it died): its bars go with it
+    state.plates.nameplate2 = plateB -- the token still resolves to the frame at the moment of the event, as in the client
+    Mock.fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
+    state.plates.nameplate2 = nil
+    target("Kobold Geomancer", plateB, "Creature-0-0-0-0-6-B")
+    equal(ns.Dots:Get(2, Mock.now), nil, "the plate went, so did its bars")
+    -- no plates at all: the name must do, and two mobs of one name share their bars
+    state.plates.target = nil
+    target("Kobold Tunneler", nil, "Creature-0-0-0-0-6-C")
+    equal(ns.Dots:Report().targetKey, "name")
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-C1", 172)
+    target("Kobold Tunneler", nil, "Creature-0-0-0-0-6-D")
+    check(ns.Dots:Get(1, Mock.now), "the same name: the same bars")
+    Mock.setCombat(false)
+    state.secretGUIDs = false
     equal(#Mock.errors, 0)
 end)
 

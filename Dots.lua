@@ -285,34 +285,111 @@ end
 -- fight's Immolate (GUID secret) land in one bucket because the key did not move. What a stand-in cannot
 -- do is recognise a mob you tab back to in a fight: that gets a fresh stand-in, and its bars return with
 -- the next cast on it.
+-- WHO THE TARGET IS WHEN THE GUID IS A SECRET. The API docs of this client mark UnitGUID "secret when the
+-- unit's identity is restricted" - a fight - but not UnitLevel, UnitClassification, UnitExists, nor the
+-- nameplate frame of a unit (C_NamePlate.GetNamePlateForUnit). A mob keeps its nameplate frame while the
+-- plate is up, so the frame's name ("NamePlate3", with the level and, when readable, the name beside it)
+-- is a key that survives tabbing away and back in a fight. Without a plate the name and level must do
+-- (two mobs of one name share their bars), and without a readable name a stand-in: "this target".
+local function weakKeyOf(unit)
+    local getPlate = type(C_NamePlate) == "table" and C_NamePlate.GetNamePlateForUnit or nil
+    if type(getPlate) == "function" then
+        local ok, frame = pcall(getPlate, unit)
+        if ok and type(frame) == "table" and not ns.IsSecret(frame) then
+            local frameName = readable(frame.GetName, frame)
+            if type(frameName) == "string" then
+                return "plate:" .. frameName .. "|" .. tostring(readable(UnitLevel, unit)) .. "|" .. tostring(readable(UnitName, unit))
+            end
+        end
+    end
+    local name = readable(UnitName, unit)
+    if type(name) == "string" and name ~= "" then
+        return "name:" .. name .. "|" .. tostring(readable(UnitLevel, unit))
+    end
+    return nil
+end
+
+-- what a weak key stood for once the GUID could be read: [weak key] = GUID, so a mob whose DoT was filed
+-- under its GUID at the pull is found again under its plate in the fight
+local aliases = {}
+local retargetsLogged = 0
+
+local function keyKind(key)
+    if not key then
+        return "none"
+    elseif string.find(key, "^target#") then
+        return "stand-in"
+    elseif string.find(key, "^plate:") then
+        return "plate"
+    elseif string.find(key, "^name:") then
+        return "name"
+    end
+    return "guid"
+end
+
 local function retarget()
-    local guid = guidOf("target")
+    local guid, weak = guidOf("target"), weakKeyOf("target")
     if guid then
         targetKey = guid
-        return
-    end
-    if readable(UnitExists, "target") == false then
+        if weak then
+            aliases[weak] = guid
+        end
+    elseif readable(UnitExists, "target") == false then
         targetKey = nil -- no target at all
-        return
+    elseif weak then
+        targetKey = aliases[weak] or weak
+    else
+        standIns = standIns + 1
+        targetKey = "target#" .. standIns
+        Dots.stats.standIns = (Dots.stats.standIns or 0) + 1
     end
-    standIns = standIns + 1
-    targetKey = "target#" .. standIns
-    Dots.stats.standIns = (Dots.stats.standIns or 0) + 1
+    if retargetsLogged < 12 and targetKey then
+        retargetsLogged = retargetsLogged + 1
+        ns:Log("dot_target", { key = keyKind(targetKey), aliased = (weak ~= nil and aliases[weak] ~= nil) or nil })
+    end
 end
 
 -- Before the key is used: should the client now give a GUID that is not the key, the key follows it. A
--- stand-in whose target can be read again (the fight is over) grows into the GUID, bars and all, so a
--- mob can be tabbed back to out of a fight; a GUID that simply differs is a target change the event has
--- not told us of yet.
+-- weak key or a stand-in whose target can be read again (the fight is over) grows into the GUID, bars and
+-- all; a GUID that simply differs is a target change the event has not told us of yet.
 local function syncTarget()
     local guid = guidOf("target")
     if not guid or guid == targetKey then
         return
     end
-    if targetKey and string.find(targetKey, "^target#") and applied[targetKey] and not applied[guid] then
-        applied[guid], applied[targetKey] = applied[targetKey], nil
+    if targetKey and keyKind(targetKey) ~= "guid" then
+        if applied[targetKey] and not applied[guid] then
+            applied[guid], applied[targetKey] = applied[targetKey], nil
+        end
+        if keyKind(targetKey) ~= "stand-in" then
+            aliases[targetKey] = guid
+        end
     end
     targetKey = guid
+end
+
+-- a plate that goes (the mob died or left) takes the bars filed under it, and what the plate stood for
+local function plateGone(token)
+    local getPlate = type(C_NamePlate) == "table" and C_NamePlate.GetNamePlateForUnit or nil
+    if type(getPlate) ~= "function" or ns.IsSecret(token) or type(token) ~= "string" then
+        return
+    end
+    local ok, frame = pcall(getPlate, token)
+    local frameName = ok and type(frame) == "table" and not ns.IsSecret(frame) and readable(frame.GetName, frame) or nil
+    if type(frameName) ~= "string" then
+        return
+    end
+    local prefix = "plate:" .. frameName .. "|"
+    for key in pairs(applied) do
+        if string.sub(key, 1, #prefix) == prefix then
+            forget(key)
+        end
+    end
+    for key in pairs(aliases) do
+        if string.sub(key, 1, #prefix) == prefix then
+            aliases[key] = nil
+        end
+    end
 end
 
 -- A corpse stays targeted; its DoTs are over. UnitIsDeadOrGhost carries no secret flag in the API docs,
@@ -591,6 +668,9 @@ end)
 ns:On("PLAYER_ENTERING_WORLD", function()
     retarget()
 end)
+ns:On("NAME_PLATE_UNIT_REMOVED", function(_, token)
+    plateGone(token)
+end)
 -- UNIT_HEALTH fires when the target dies (the value is secret; the event is not), UNIT_FLAGS too
 ns:On("UNIT_HEALTH", function(_, unit) if unit == "target" then dropIfDead("target") end end)
 ns:On("UNIT_FLAGS", function(_, unit) if unit == "target" then dropIfDead("target") end end)
@@ -616,7 +696,7 @@ function Dots:Report()
         end
     end
     return { enemies = enemies, timers = timers, learned = learned, learnedNames = learnedNames, observed = observed,
-        targetKey = targetKey and (string.find(targetKey, "^target#") and "stand-in" or "guid") or "none",
+        targetKey = keyKind(targetKey),
         standIns = self.stats.standIns or 0, skipped = self.stats.skipped or 0,
         dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
         expected = COMBO_SECONDS, tracked = self:GetTracked() }

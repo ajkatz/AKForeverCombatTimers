@@ -445,6 +445,12 @@ function Mock.install(options)
         return state.units[unit]
     end
     G.UnitExists = function(unit) return unitInfo(unit) ~= nil end
+    -- a unit's nameplate frame, or nothing: state.plates[unit] = { GetName = function() return "NamePlate3" end }
+    state.plates = {}
+    G.C_NamePlate = {
+        GetNamePlateForUnit = function(unit) return state.plates[unit] end,
+        GetNamePlates = function() local list = {} for _, plate in pairs(state.plates) do list[#list + 1] = plate end return list end,
+    }
     G.UnitIsDeadOrGhost = function(unit) return state.dead[unit] == true end -- no secret flag on this one
     -- The player's name as the client gives it: state.surname adds a WoW: Forever surname; state.build70170
     -- puts it in the realm slot, as the client does since Oct 1 2026 (UnitFullName("player") -> "Purrdee",
