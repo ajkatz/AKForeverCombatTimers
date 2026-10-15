@@ -1,0 +1,23 @@
+# Copied from ajkatz/discord-hub templates/discord-announce.yml.
+# Secrets in this repo: DISCORD_WEBHOOK_URL (required),
+# ANTHROPIC_API_KEY (optional; without it the post is a plain commit list).
+name: Announce pushes to Discord
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-announce-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    uses: ajkatz/discord-hub/.github/workflows/announce.yml@main
+    with:
+      project_name: "Forever Combat Timers"
+      project_description: "WoW: Forever - combat timers in one block: your swings, the next enemy hit, cast bars, buff and DoT timers, reactive windows"
+    secrets: inherit
