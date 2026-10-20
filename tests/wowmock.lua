@@ -502,7 +502,13 @@ function Mock.install(options)
     end
     G.UnitClass = function() return "Player Class", state.playerClass end
     G.UnitRace = function() return state.playerRace, state.playerRace end
-    G.GetUnitSpeed = function() return state.speed or 0 end
+    state.movementSecretInCombat = options.movementSecretInCombat
+    G.GetUnitSpeed = function()
+        if state.inCombat and state.movementSecretInCombat then
+            return Mock.SECRET -- SecretWhenUnitStatsRestricted: this client keeps it from addons in a fight
+        end
+        return state.speed or 0
+    end
     G.IsFalling = function() return state.falling and true or false end
     G.UnitIsUnit = function(a, b)
         local infoA, infoB = unitInfo(a), unitInfo(b)
@@ -584,7 +590,16 @@ function Mock.install(options)
         GetContainerItemID = function(bag, slot) return state.bags[bag] and state.bags[bag][slot] end,
     }
     G.GetInventoryItemID = function(_, slot) return state.worn[slot] end
+    state.itemKinds = options.itemKinds or {} -- [itemID] = { classID, subclassID } (2, 3 = a gun)
     G.C_Item = {
+        -- itemID, itemType, itemSubType, itemEquipLoc, icon, classID, subclassID
+        GetItemInfoInstant = function(itemID)
+            local kind = state.itemKinds[itemID]
+            if not kind then
+                return nil
+            end
+            return itemID, "Weapon", "", "INVTYPE_RANGED", 0, kind[1], kind[2]
+        end,
         GetItemSpell = function(itemID)
             local item = state.itemSpells[itemID]
             if item then
@@ -888,9 +903,17 @@ function Mock.stackingBuff(spellID, name, stacks)
     Mock.fireUnit("UNIT_AURA", "player", "player", { isFullUpdate = true })
 end
 
--- The player starts or stops moving (the bar asks for this once a frame; no event is involved).
+-- The player starts or stops moving: GetUnitSpeed changes (a secret in a fight on this client when the
+-- scenario says so: options.movementSecretInCombat), and the client's own PLAYER_STARTED_MOVING /
+-- PLAYER_STOPPED_MOVING events fire on the change.
 function Mock.setSpeed(speed)
+    local was = Mock.state.speed or 0
     Mock.state.speed = speed
+    if was == 0 and speed > 0 then
+        Mock.fire("PLAYER_STARTED_MOVING")
+    elseif was > 0 and speed == 0 then
+        Mock.fire("PLAYER_STOPPED_MOVING")
+    end
 end
 
 -- Off the ground. A jump from a standstill reads zero speed the whole way up and down.

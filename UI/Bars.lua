@@ -39,6 +39,7 @@ local COLORS = {
     MH = { 0.85, 0.72, 0.25 },
     OH = { 0.62, 0.55, 0.30 },
     RG = { 0.40, 0.75, 0.40 },
+    AIM = { 0.90, 0.30, 0.25 }, -- the ranged bar's second phase: the half-second aim, a quick cast
     ENEMY = { 0.80, 0.25, 0.20 },
     CAST = { 0.30, 0.58, 0.95 },
     TCAST = { 0.95, 0.52, 0.15 },
@@ -417,6 +418,14 @@ local function progressFor(key, now, testing)
     if testing then
         local cycle = TEST_CYCLES[key]
         local elapsed = (now - (testUntil - 15)) % cycle
+        local aim = key == "RG" and Swings:AimSeconds(key) or nil
+        if aim then -- the preview shows the two phases too
+            local wait = cycle - aim
+            if elapsed < wait then
+                return true, elapsed / wait, wait - elapsed, false, nil, COLORS[key], "wait"
+            end
+            return true, (elapsed - wait) / aim, cycle - elapsed, false, nil, COLORS.AIM, "aim"
+        end
         return true, elapsed / cycle, cycle - elapsed, false
     end
     if key == "ENEMY" then
@@ -425,7 +434,13 @@ local function progressFor(key, now, testing)
     elseif key == "PLAINS" then
         return ns.Plains:GetProgress(now)
     end
-    local active, fraction, remaining = Swings:GetProgress(key, now)
+    local active, fraction, remaining, phase, note = Swings:GetPhasedProgress(key, now)
+    if phase == "aim" or phase == "windup" then
+        local text = (note == "moving" and "moving") or (note == "held" and (phase == "windup" and "ready" or "aimed")) or nil
+        return active, fraction, remaining, Swings.state[key].outOfRange, text, COLORS.AIM, phase
+    elseif phase == "wait" then
+        return active, fraction, remaining, Swings.state[key].outOfRange, nil, COLORS[key], phase
+    end
     return active, fraction, remaining, Swings.state[key].outOfRange
 end
 
@@ -437,7 +452,7 @@ local function inUse(key, now)
     elseif SOURCES[key] then
         return SOURCES[key](now) ~= nil
     end
-    return (Swings:GetProgress(key, now)) and true or false
+    return (Swings:GetPhasedProgress(key, now)) and true or false -- (an aim held for the shot is in use)
 end
 
 -- Does this bar mean anything for this character right now?
@@ -630,9 +645,16 @@ function Bars:Update()
                 shown = shown + 1
                 local dim = false
                 if bar.kind == "swing" then
-                    local active, fraction, remaining, text, color
-                    active, fraction, remaining, dim, text, color = progressFor(key, now, testing)
+                    local active, fraction, remaining, text, color, phase
+                    active, fraction, remaining, dim, text, color, phase = progressFor(key, now, testing)
                     setProgress(bar, active, fraction, remaining, text, color)
+                    if key == "RG" then
+                        -- a weapon that aims: the bar reads "Aim" for its quick second phase, "Ranged" otherwise
+                        if phase ~= bar.phase then
+                            bar.phase = phase
+                            bar.label:SetText((phase == "aim" and "Aim") or (phase == "windup" and "Wind-up") or Settings.LABELS[key])
+                        end
+                    end
                     if key == "ENEMY" then
                         local _, _, _, _, attackers = Incoming:GetProgress(now)
                         bar.label:SetText(watchedLabel(attackers))

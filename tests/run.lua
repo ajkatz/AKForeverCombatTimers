@@ -141,6 +141,260 @@ scenario("hunters: the ranged bar has its row from the start and shows while sho
     equal(ns.Bars.bars.RG:IsShown(), true)
 end)
 
+scenario("the aim: a bow, gun, crossbow or thrown weapon runs its cycle in two phases on the ranged bar - the wait fills it like a swing, then the half-second aim fills it again as a quick red cast labelled Aim; a wand or nothing in the slot runs one plain phase", function()
+    local GUN, WAND, THROWN = 2100, 2119, 2116
+    local ns, state = start({ class = "HUNTER", worn = { [18] = GUN }, itemKinds = { [GUN] = { 2, 3 }, [WAND] = { 2, 19 }, [THROWN] = { 2, 16 } } },
+        function(s) s.attackSpeed.player = { 2.0, nil, 2.091 } end)
+    equal(ns.Swings.ranged.kind, "gun", "the ranged slot read at login")
+    equal(ns.Swings:AimSeconds("RG"), 0.5); equal(ns.Swings:AimSeconds("MH"), nil, "melee has no aim")
+    Mock.setCombat(true)
+    Mock.swing(2.091, RG)
+    local bar = ns.Bars.bars.RG
+    -- the wait: 1.591 s, filling as a swing does
+    Mock.advance(1.0)
+    local active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(phase, "wait"); near(fraction, 1.0 / 1.591, 0.001); near(remaining, 0.591, 0.001)
+    ns.Bars:Update()
+    near(bar.fill:GetWidth(), WIDTH * 1.0 / 1.591, 0.5, "the bar fills over the wait, not the whole cycle")
+    equal(bar.time:GetText(), "0.6", "seconds until the aim")
+    equal(bar.label:GetText(), "Ranged"); equal(bar.phase, "wait")
+    -- the aim: half a second, filling again from empty, in red, labelled
+    Mock.advance(0.7)
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "aim"); near(fraction, (1.7 - 1.591) / 0.5, 0.001); near(remaining, 2.091 - 1.7, 0.001)
+    ns.Bars:Update()
+    near(bar.fill:GetWidth(), WIDTH * (1.7 - 1.591) / 0.5, 0.5, "a quick cast of its own")
+    equal(bar.label:GetText(), "Aim"); equal(bar.phase, "aim")
+    equal(bar.time:GetText(), "0.4", "seconds until the shot")
+    -- aimed, standing still: the bar holds full for the shot, which is the server's now
+    Mock.advance(0.5)
+    local note
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active, "held for the shot"); equal(phase, "aim"); near(fraction, 1, 0.001); equal(note, "held")
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "aimed"); equal(bar.fill:IsShown(), true)
+    -- the next shot: the label is Ranged again for the wait, and the shot's lateness against the aim is kept
+    Mock.swing(2.091, RG)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Ranged"); equal(bar.phase, "wait")
+    near(ns.Swings.autoRepeat.aimLags[1], 2.2 - 2.091, 0.001, "the shot came this long after the aim was done")
+    -- a wand: the same half second, under its own word
+    state.worn[18] = WAND
+    Mock.fire("PLAYER_EQUIPMENT_CHANGED", 18)
+    equal(ns.Swings.ranged.kind, "wand")
+    equal(ns.Swings:AimSeconds("RG"), 0.5, "a wand winds up the same half second")
+    Mock.swing(1.5, RG)
+    Mock.advance(1.2)
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "windup"); near(fraction, (1.2 - 1.0) / 0.5, 0.001)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Wind-up"); equal(bar.phase, "windup")
+    -- something thrown: the two phases again
+    state.worn[18] = THROWN
+    Mock.fire("PLAYER_EQUIPMENT_CHANGED", 18)
+    equal(ns.Swings.ranged.kind, "thrown")
+    Mock.swing(2.0, RG)
+    Mock.advance(1.6)
+    local _, _, _, thrownPhase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(thrownPhase, "aim", "thrown weapons aim too")
+    -- the slot empty: nothing to aim with, one plain phase
+    state.worn[18] = nil
+    Mock.fire("PLAYER_EQUIPMENT_CHANGED", 18)
+    equal(ns.Swings.ranged.kind, nil); equal(ns.Swings:AimSeconds("RG"), nil)
+    Mock.swing(1.5, RG)
+    Mock.advance(1.2)
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, nil); near(fraction, 1.2 / 1.5, 0.001)
+    -- the melee bars never have phases
+    Mock.swing(2.0, MH)
+    Mock.advance(1.9)
+    local _, _, _, meleePhase = ns.Swings:GetPhasedProgress("MH", Mock.now)
+    equal(meleePhase, nil)
+    check(#Mock.errors == 0)
+end)
+
+scenario("the aim follows the feet - by the client's own movement events, since GetUnitSpeed is a secret in a fight: moving when the cooldown ends, the aim waits ('moving') past the cycle's end; standing still starts it, a step restarts it, aimed it holds ('aimed') until the shot's own event; out of range for too long, the bar gives up", function()
+    local GUN = 2100
+    local ns = start({ class = "HUNTER", worn = { [18] = GUN }, itemKinds = { [GUN] = { 2, 3 } }, movementSecretInCombat = true }, function(s) s.attackSpeed.player = { 2.0, nil, 2.091 } end)
+    Mock.setCombat(true)
+    check(ns.IsSecret(GetUnitSpeed("player")), "the speed is a secret in this fight: the events must do")
+    local bar = ns.Bars.bars.RG
+    Mock.swing(2.091, RG)
+    Mock.setSpeed(7) -- running
+    Mock.advance(1.8) -- the cooldown ended at 1.591, on the move
+    local active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(phase, "aim"); near(fraction, 0, 0.001); equal(note, "moving")
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Aim"); equal(bar.time:GetText(), "moving")
+    Mock.advance(1.0) -- still running: past the cycle's end, and still on the bar
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active, "no shot while moving: the aim waits, the bar stays"); equal(note, "moving")
+    ns.Bars:Update()
+    equal(bar:IsShown(), true); equal(bar.fill:IsShown(), true)
+    -- the hunter stops: the aim starts from here
+    Mock.setSpeed(0)
+    Mock.advance(0.3)
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "aim"); near(fraction, 0.6, 0.001); near(remaining, 0.2, 0.001); equal(note, nil)
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "0.2")
+    -- a step restarts it
+    Mock.setSpeed(7)
+    Mock.advance(0.1)
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    near(fraction, 0, 0.001); equal(note, "moving")
+    equal(ns.Swings.autoRepeat.aimsInterrupted, 1, "a step into a running aim is counted")
+    Mock.setSpeed(0)
+    Mock.advance(0.25)
+    active, fraction = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    near(fraction, 0.5, 0.001, "from the stop, not from where it was")
+    Mock.advance(0.3)
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); near(fraction, 1, 0.001); equal(note, "held", "aimed: the shot is the server's")
+    -- the shot
+    Mock.advance(0.06)
+    Mock.swing(2.091, RG)
+    near(ns.Swings.autoRepeat.aimLags[1], 0.11, 0.002, "the shot came this long after the aim was done") -- (kept to the millisecond, floored)
+    equal(select(4, ns.Swings:GetPhasedProgress("RG", Mock.now)), "wait")
+    equal(ns.Swings.movement.starts, 2); equal(ns.Swings.movement.stops, 2, "the feet were heard, twice each way")
+    equal(ns.Diagnostics:Collect().player.movement.stops, 2, "and the report says so")
+    -- a jump is a step too
+    Mock.advance(1.7)
+    Mock.setFalling(true)
+    equal(select(5, ns.Swings:GetPhasedProgress("RG", Mock.now)), "moving", "airborne: no aim")
+    Mock.setFalling(false)
+    -- aimed but no shot for ten seconds (out of range, say): the bar gives up
+    Mock.advance(0.6)
+    check((ns.Swings:GetPhasedProgress("RG", Mock.now)), "aiming again on the ground")
+    Mock.advance(10.5)
+    equal((ns.Swings:GetPhasedProgress("RG", Mock.now)), false, "patience is ten seconds")
+    check(#Mock.errors == 0)
+end)
+
+scenario("the first shot: Auto Shot switched on starts the aim at once - a half-second Aim with no wait before it - and the first swing takes over; switched off before it fires, the aim goes; a wand or a running cycle gets nothing from it; how long the first shot took to come is kept for /fct diag", function()
+    local GUN, WAND = 2100, 2119
+    local ns, state = start({ class = "HUNTER", worn = { [18] = GUN }, itemKinds = { [GUN] = { 2, 3 }, [WAND] = { 2, 19 } } },
+        function(s) s.attackSpeed.player = { 2.0, nil, 2.091 } end)
+    Mock.setCombat(true)
+    local bar = ns.Bars.bars.RG
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    local active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active, "the aim runs from the moment Auto Shot is on"); equal(phase, "aim"); near(fraction, 0, 0.001); near(remaining, 0.5, 0.001)
+    Mock.advance(0.3)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Aim"); equal(bar.phase, "aim")
+    near(bar.fill:GetWidth(), WIDTH * 0.6, 0.5, "a quick cast of half a second")
+    equal(bar.time:GetText(), "0.2")
+    -- the first shot fires: the swing event takes over with a whole cycle, wait first
+    Mock.advance(0.2)
+    Mock.swing(2.091, RG)
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "wait"); near(fraction, 0, 0.001)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Ranged")
+    near(ns.Swings.autoRepeat.firstSwingAfter[1], 0.5, 0.001, "the first shot came half a second after Auto Shot went on: measured and kept")
+    equal(ns.Swings.autoRepeat.starts, 1)
+    local report = ns.Diagnostics:Collect()
+    near(report.player.autoShot.firstSwingAfter[1], 0.5, 0.001, "and in the report"); equal(report.player.rangedWeapon.kind, "gun")
+    -- Auto Shot switched on again while the cycle's cooldown runs (a cancel does not stop the game's cooldown):
+    -- the cycle carries on - its wait, then the aim - never an aim before the cooldown is up
+    Mock.advance(1.0)
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "wait"); near(fraction, 1.0 / 1.591, 0.001, "the running cooldown stands: no aim before it is up")
+    equal(ns.Swings.autoRepeat.resumed, 1, "counted as a resume of a running cycle")
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Ranged")
+    Mock.advance(0.7)
+    equal(select(4, ns.Swings:GetPhasedProgress("RG", Mock.now)), "aim")
+    Mock.advance(0.5)
+    Mock.swing(2.091, RG)
+    Mock.advance(2.2)
+    -- switched on, then off before the first shot: the aim goes
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    Mock.advance(0.2)
+    check((ns.Swings:GetPhasedProgress("RG", Mock.now)), "aiming")
+    Mock.fire("STOP_AUTOREPEAT_SPELL")
+    equal((ns.Swings:GetPhasedProgress("RG", Mock.now)), false, "nothing will fire: the aim is gone")
+    ns.Bars:Update()
+    equal(bar.fill:IsShown(), false)
+    -- stopped mid-cycle, then started again: the stop takes the bar down (nothing fires while it is off), but
+    -- the game's cooldown runs on - the restart picks the cycle up where it stands, its wait first, then the aim
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    Mock.advance(0.5)
+    Mock.swing(2.091, RG)
+    Mock.advance(0.8)
+    check(select(4, ns.Swings:GetPhasedProgress("RG", Mock.now)) == "wait", "in the wait of a cycle")
+    Mock.fire("STOP_AUTOREPEAT_SPELL")
+    equal((ns.Swings:GetPhasedProgress("RG", Mock.now)), false, "stopped: nothing fires while it is off, the bar goes")
+    ns.Bars:Update()
+    equal(bar.fill:IsShown(), false)
+    Mock.advance(0.4)
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active, "started again: the cycle, where it stands"); equal(phase, "wait"); near(fraction, 1.2 / 1.591, 0.001)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Ranged")
+    Mock.advance(0.4) -- the cooldown is up at 1.591: the aim, half a second uninterrupted
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "aim"); near(fraction, (1.6 - 1.591) / 0.5, 0.001)
+    Mock.advance(0.5)
+    Mock.swing(2.091, RG)
+    equal(select(4, ns.Swings:GetPhasedProgress("RG", Mock.now)), "wait")
+    equal(ns.Swings.autoRepeat.stops, 2)
+    -- stopped in the aim and started again after the cycle's end: the half second runs from the switch-on, never earlier
+    Mock.advance(1.8) -- in the aim (the cooldown was up at 1.591)
+    Mock.fire("STOP_AUTOREPEAT_SPELL")
+    Mock.advance(0.6) -- past the cycle's end (2.091)
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(phase, "aim"); near(fraction, 0, 0.001, "no pre-aim: the half second runs from the switch-on")
+    Mock.advance(0.25)
+    active, fraction = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    near(fraction, 0.5, 0.001)
+    Mock.advance(0.25)
+    Mock.swing(2.091, RG)
+    near(ns.Swings.autoRepeat.aimLags[1], 0, 0.002)
+    Mock.advance(2.2)
+    -- a wand's Shoot switched on: the same half second as a gun's aim (measured), under the word "Wind-up",
+    -- the feet's rules the same; its cycles end in a wind-up too
+    state.worn[18] = WAND
+    Mock.fire("PLAYER_EQUIPMENT_CHANGED", 18)
+    equal(ns.Swings:AimSeconds("RG"), 0.5, "a wand winds up the same half second")
+    Mock.fire("START_AUTOREPEAT_SPELL")
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(phase, "windup"); near(fraction, 0, 0.001); near(remaining, 0.5, 0.001)
+    Mock.advance(0.3)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Wind-up"); equal(bar.phase, "windup")
+    near(bar.fill:GetWidth(), WIDTH * 0.6, 0.5)
+    Mock.setSpeed(7) -- a step restarts a wind-up too
+    Mock.advance(0.2)
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    equal(phase, "windup"); equal(note, "moving")
+    Mock.setSpeed(0)
+    Mock.advance(0.6)
+    active, fraction, remaining, phase, note = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(note, "held", "wound up: the shot is the server's")
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "ready")
+    Mock.swing(1.8, RG) -- the first wand shot: a cycle of the wand's speed, its wait first
+    Mock.advance(1.0)
+    active, fraction, remaining, phase = ns.Swings:GetPhasedProgress("RG", Mock.now)
+    check(active); equal(phase, "wait"); near(fraction, 1.0 / 1.3, 0.001)
+    ns.Bars:Update()
+    equal(bar.label:GetText(), "Ranged")
+    Mock.advance(0.5)
+    equal(select(4, ns.Swings:GetPhasedProgress("RG", Mock.now)), "windup", "and the wind-up at its end")
+    -- a shot that comes while the feet move is counted: the measure of whether a wand minds the feet at all
+    Mock.setSpeed(7)
+    Mock.swing(1.8, RG)
+    equal(ns.Swings.autoRepeat.shotsWhileMoving, 1)
+    Mock.setSpeed(0)
+    equal(ns.Swings.autoRepeat.starts, 7)
+    check(#Mock.errors == 0)
+end)
+
 scenario("an attack speed change rescales what is left of the running swing", function()
     local ns, state = start(nil, function(s) s.attackSpeed.player = { 2.0, nil, nil } end)
     Mock.swing(2.0, MH)
@@ -1715,6 +1969,117 @@ scenario("... and it still works in a fight, where the auras are shut to us", fu
     check(dot, "a fight is where a DoT timer earns its place")
     equal(dot.source, "cast")
     equal(#Mock.errors, 0, "the refused aura lookup is expected, not an error")
+end)
+
+scenario("a Flame Shock the mob resisted draws no bar: the target's own word (UNIT_COMBAT) within a second takes it down; damage of that school marks it landed", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.setCombat(true)
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now), "the bar starts with the cast")
+    Mock.fire("UNIT_COMBAT", "target", "RESIST", "", 0, 4) -- the target resisted a fire spell
+    equal(ns.Dots:Get(1, Mock.now), nil, "resisted: no DoT, no bar")
+    equal(ns.Dots.stats.notLanded, 1)
+    -- a full resist reported as a wound of nothing
+    castFlameShock()
+    Mock.advance(0.3)
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "RESIST", 0, 4)
+    equal(ns.Dots:Get(1, Mock.now), nil, "a wound of nothing marked RESIST is a full resist")
+    equal(ns.Dots.stats.notLanded, 2)
+    -- immune: no bar either
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "IMMUNE", "", 0, 4)
+    equal(ns.Dots:Get(1, Mock.now), nil, "immune: no bar")
+    -- a partial resist still lands the DoT, and so does a fully absorbed one
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "RESIST", 57, 4)
+    local dot = ns.Dots:Get(1, Mock.now)
+    check(dot and dot.source == "cast, landed", "damage done, however little: landed - " .. tostring(dot and dot.source))
+    equal(ns.Dots.stats.landed, 1)
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "ABSORB", 0, 4)
+    check(ns.Dots:Get(1, Mock.now), "absorbed in full: the DoT is on all the same")
+    -- a wound of nothing with no flag at all is how the client says "miss"
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "", 0, 4)
+    equal(ns.Dots:Get(1, Mock.now), nil, "no damage, no flag: a miss, no bar")
+    equal(ns.Dots.samples[#ns.Dots.samples].source, "cast - miss, not landed")
+    equal(ns.Dots:Report().landing.notLanded, 4); equal(ns.Dots:Report().landing.landed, 1)
+    -- a resist the client reports with no school at all is taken as ours
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "RESIST", "", 0, 0)
+    equal(ns.Dots:Get(1, Mock.now), nil, "a resist with school 0: not landed")
+    -- the client names the mob by whatever token points at it: a nameplate, the soft target - matched by its key
+    state.guids.nameplate1 = state.guids.target
+    state.guids.softenemy = state.guids.target
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "nameplate1", "RESIST", "", 0, 4)
+    equal(ns.Dots:Get(1, Mock.now), nil, "the resist under the mob's nameplate token: not landed")
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "softenemy", "WOUND", "", 61, 4)
+    equal(ns.Dots:Get(1, Mock.now).source, "cast, landed", "damage under the soft-target token: landed")
+    state.guids.nameplate2 = "Creature-0-0-0-0-111-Z"
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "nameplate2", "RESIST", "", 0, 4)
+    check(ns.Dots:Get(1, Mock.now), "another mob's resist under its own plate: not ours")
+    -- the word may come a hair before the cast's own success: the last half second is looked back on
+    Mock.advance(1.2) -- (the last cast's window lapses first: unknown)
+    Mock.fire("UNIT_COMBAT", "nameplate1", "RESIST", "", 0, 4)
+    Mock.advance(0.2)
+    castFlameShock()
+    equal(ns.Dots:Get(1, Mock.now), nil, "resisted, told before the cast's success: no bar")
+    local lastSample = ns.Dots.landingSamples[#ns.Dots.landingSamples]
+    check(lastSample.verdict:find("before the cast", 1, true), "and said so: " .. tostring(lastSample.verdict))
+    Mock.fire("UNIT_COMBAT", "nameplate1", "RESIST", "", 0, 4)
+    Mock.advance(0.8)
+    castFlameShock()
+    check(ns.Dots:Get(1, Mock.now), "a word older than half a second is not about this cast")
+    equal(ns.Diagnostics:Collect().dots.landing.notLanded, ns.Dots.stats.notLanded, "the figures reach the report")
+    -- what the client sent is kept, each event with its verdict, for the report
+    local samples = ns.Dots:Report().landing.samples
+    check(#samples >= 6, "the events seen while a landing was in question are kept: " .. #samples)
+    equal(samples[1].verdict, "not landed"); equal(samples[1].action, "RESIST"); equal(samples[1].school, 4); equal(samples[1].spell, "flame shock")
+    local schoolZero = false
+    for _, sample in ipairs(samples) do if sample.school == 0 and sample.verdict == "not landed" then schoolZero = true end end
+    check(schoolZero, "the school-0 resist is among them, judged not landed")
+    check(#Mock.errors == 0)
+end)
+
+scenario("a swing or another school at the same moment says nothing about the DoT; a word a second late is some other spell's; a word about another target is not about the cast; bleeds are left alone", function()
+    local ns, state = shaman()
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.setCombat(true)
+    castFlameShock()
+    Mock.fire("UNIT_COMBAT", "target", "DODGE", "", 0, 1)   -- your swing was dodged: physical, not the shock
+    check(ns.Dots:Get(1, Mock.now), "a dodged swing is not a resisted shock")
+    equal(ns.Dots.landingSamples[#ns.Dots.landingSamples].verdict, "another school")
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "", 30, 32) -- a warlock's shadow damage: not ours
+    equal(ns.Dots:Get(1, Mock.now).source, "cast", "another school confirms nothing")
+    Mock.fire("UNIT_COMBAT", "player", "RESIST", "", 0, 4)  -- you resisted something: not the target's word
+    check(ns.Dots:Get(1, Mock.now), "the player's own word is about the player")
+    Mock.advance(1.5)
+    Mock.fire("UNIT_COMBAT", "target", "RESIST", "", 0, 4)  -- too late to be about that cast
+    check(ns.Dots:Get(1, Mock.now), "a resist a second and a half later is some other spell's")
+    equal(ns.Dots.stats.landingUnknown, 1); equal(ns.Dots.stats.notLanded, 0)
+    -- the target changed between the cast and the word: the word is the new target's
+    Mock.advance(0.6) -- (a new instant: the late word above is nobody's now)
+    castFlameShock()
+    state.guids.target = "Creature-0-0-0-0-111-B"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    Mock.fire("UNIT_COMBAT", "target", "RESIST", "", 0, 4)
+    state.guids.target = "Creature-0-0-0-0-111-A"
+    Mock.fire("PLAYER_TARGET_CHANGED")
+    check(ns.Dots:Get(1, Mock.now), "the first mob's shock stays: the resist was the second mob's")
+    equal(ns.Dots.stats.notLanded, 0)
+    -- a bleed: a miss cannot be told from a swing's, so nothing is waited for
+    local wns, wstate = start({ class = "WARRIOR", spellNames = { [772] = "Rend" } })
+    wstate.guids.target = "Creature-0-0-0-0-111-C"
+    Mock.setCombat(true)
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-R", 772)
+    check(wns.Dots:Get(1, Mock.now), "Rend's bar")
+    equal(wns.Dots:Report().landing.pending, false, "no landing in question for a bleed")
+    Mock.fire("UNIT_COMBAT", "target", "DODGE", "", 0, 1)
+    check(wns.Dots:Get(1, Mock.now), "a dodge takes nothing down: it may have been the swing's")
 end)
 
 scenario("a readable aura corrects the clock AND teaches how long that spell really runs", function()

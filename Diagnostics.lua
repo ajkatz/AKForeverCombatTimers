@@ -345,6 +345,9 @@ function Diagnostics:Collect()
         attackSpeed = try(UnitAttackSpeed, "player"),
         swings = sanitize(ns.Swings.state),
         swingsLocked = ns.Swings.locked,
+        rangedWeapon = sanitize(ns.Swings.ranged),
+        autoShot = sanitize(ns.Swings.autoRepeat), -- starts, and how long after each the first swing came
+        movement = sanitize(ns.Swings.movement), -- the feet, by the client's own events
     }
 
     report.enemy = {
@@ -414,6 +417,7 @@ function Diagnostics:Collect()
             observedLengths = sanitize(dots.observed), assumedLengths = sanitize(dots.expected),
             enemiesRemembered = dots.enemies, timersRunning = dots.timers,
             targetKey = dots.targetKey, standIns = dots.standIns, skipped = dots.skipped,
+            landing = sanitize(dots.landing), -- landed / not landed / unknown, and the words seen while a cast was in question
             recent = sanitize(ns.Dots.samples) }
     end
     -- The reactive windows: what has a bar, what is open right now, and the counts - in particular how

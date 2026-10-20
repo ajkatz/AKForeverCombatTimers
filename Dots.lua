@@ -66,6 +66,22 @@ local RANK_SECONDS = {
     [772] = 9, [6546] = 12, [6547] = 15, [6548] = 18, -- Rend ranks 1 to 4 (21 from rank 5)
 }
 
+-- The school of each DoT's damage as UNIT_COMBAT reports it (1 physical, 2 holy, 4 fire, 8 nature, 16 frost,
+-- 32 shadow, 64 arcane), to tell the target's word on OUR cast from a swing landing at the same moment.
+-- The bleeds are physical, like a white swing, so a miss of theirs cannot be told apart: no landing check.
+local SCHOOL = {
+    ["flame shock"] = 4, ["immolate"] = 4,
+    ["serpent sting"] = 8,
+    ["shadow word: pain"] = 32, ["corruption"] = 32, ["bane of agony"] = 32, ["curse of agony"] = 32,
+    ["moonfire"] = 64,
+    ["rend"] = 1, ["rupture"] = 1, ["rip"] = 1, ["garrote"] = 1,
+}
+local LANDING_SECONDS = 1 -- how long after a cast the target's word on it is waited for (it comes with the cast's own packet)
+local MISSED = { MISS = true, DODGE = true, PARRY = true, RESIST = true, IMMUNE = true, EVADE = true, DEFLECT = true, REFLECT = true }
+-- a WOUND of nothing is a miss unless marked ABSORB or BLOCK (Blizzard's CombatFeedback.lua reads it the same
+-- way: no amount and no such flag draws "Miss"); an absorbed or blocked cast still lands its DoT
+local LANDED_FLAGS = { ABSORB = true, BLOCK = true }
+
 local KEEP_ENEMIES = 12   -- mobs worth remembering at once; a pull, not a raid night
 local GONE_AFTER = 60     -- an enemy nothing has happened to for this long is forgotten
 
@@ -83,7 +99,7 @@ local observed = {}
 local serial = 0
 
 Dots.samples = {}         -- for /fct diag
-Dots.stats = { droppedDead = 0, droppedGone = 0, standIns = 0, skipped = 0 }
+Dots.stats = { droppedDead = 0, droppedGone = 0, standIns = 0, skipped = 0, landed = 0, notLanded = 0, landingUnknown = 0 }
 local MAX_SAMPLES = 12
 
 local function now()
@@ -204,6 +220,64 @@ local function skip(why, spellID)
     end
 end
 
+-- DID IT LAND? A cast that succeeded may still have been resisted (seen in game 2026-10-16: a resisted
+-- Flame Shock drew a twelve-second bar). The combat log is shut to addons, but UNIT_COMBAT is not: it names
+-- what just happened to the target - WOUND with an amount and a school, or a RESIST / IMMUNE / MISS - and
+-- it comes in the same breath as the cast's success. So for a second after a cast the target's word is
+-- waited for: a miss in the spell's school takes the bar down again; damage of that school marks it landed;
+-- anything of another school is a swing or somebody else's spell and says nothing. No word within the
+-- second leaves the bar as it was. One cast is in question at a time - the next cast settles the last.
+local landing -- { key, spell, serial, school, deadline }
+local lookBack -- (defined with the UNIT_COMBAT handler below) the words of the last half second, weighed at once
+Dots.landingSamples = {} -- the first UNIT_COMBAT events seen while a cast's landing was in question, each with its verdict
+local LANDING_SAMPLES_MAX = 16
+
+local function plainOr(value, fallback)
+    if ns.IsSecret(value) then
+        return "<secret>"
+    end
+    if value == nil then
+        return fallback
+    end
+    return value
+end
+
+-- the kind of a key, spelt out (keyKind proper is defined further down: a plain pattern does here)
+local function kindOf(key)
+    if type(key) ~= "string" then
+        return "?"
+    end
+    return string.match(key, "^(target)#") or string.match(key, "^(plate):") or string.match(key, "^(name):") or "guid"
+end
+
+local function noteLanding(unit, action, flagText, amount, school, verdict, spell, kind)
+    if #Dots.landingSamples >= LANDING_SAMPLES_MAX then
+        return
+    end
+    Dots.landingSamples[#Dots.landingSamples + 1] = {
+        t = math.floor(now() * 1000) / 1000, spell = spell or "?", verdict = verdict, key = kind or "?",
+        unit = plainOr(unit, "?"), action = plainOr(action, "?"), flag = plainOr(flagText, ""), amount = plainOr(amount, "?"), school = plainOr(school, "?"),
+    }
+end
+
+local function settleLanding(at)
+    if landing and at > landing.deadline then
+        Dots.stats.landingUnknown = Dots.stats.landingUnknown + 1
+        landing = nil
+    end
+end
+
+local function armLanding(key, spell, entry, at)
+    settleLanding(at)
+    if SCHOOL[spell] == 1 then
+        return -- a bleed: its miss looks exactly like a white swing's
+    end
+    landing = { key = key, spell = spell, serial = entry.serial, school = SCHOOL[spell], deadline = at + LANDING_SECONDS }
+    if lookBack then
+        lookBack(at)
+    end
+end
+
 -- A DoT of ours landed, and we know when it must end
 local function start(guid, spell, name, texture, at, seconds, source)
     local spells = bucket(guid)
@@ -218,6 +292,9 @@ local function start(guid, spell, name, texture, at, seconds, source)
         timesReadable = true, -- the whole point: these are our numbers, not the client's secrets
     }
     note({ spell = name, seconds = seconds, source = source, guid = guid ~= nil })
+    if source == "cast" then
+        armLanding(guid, spell, spells[spell], at)
+    end
     return spells[spell]
 end
 
@@ -363,6 +440,9 @@ local function syncTarget()
         end
         if keyKind(targetKey) ~= "stand-in" then
             aliases[targetKey] = guid
+        end
+        if landing and landing.key == targetKey then
+            landing.key = guid
         end
     end
     targetKey = guid
@@ -654,6 +734,127 @@ local function onCast(_, _, castGUID, spellID)
     start(guid, spell, name, textureOf(spellID), now(), seconds, "cast")
 end
 
+-- THE TARGET'S WORD ON THE CAST IN QUESTION (see armLanding). The client reports what happens to a mob under
+-- whatever unit tokens point at it - nameplateN, softenemy, targettarget, and "target" only now and then
+-- (measured 2026-10-16: 120 events, "target" twice) - so the word is matched by the KEY the unit resolves
+-- to, exactly as the cast's target was keyed (its GUID when readable, else its plate or name key, or what
+-- that key stood for), not by the token. And it may come a hair BEFORE the cast's own success: the last
+-- few words are kept, and a cast looks back half a second when it is armed. Every field may be secret,
+-- so each is cleared before it is looked at.
+local LOOK_BACK_SECONDS = 0.5
+local recentWords = {} -- the last few UNIT_COMBAT events, newest last: { t, unit, action, flag, amount, school }
+local RECENT_WORDS_MAX = 8
+
+local function keyOfUnit(unit)
+    local guid = guidOf(unit)
+    if guid then
+        return guid
+    end
+    local weak = weakKeyOf(unit)
+    if weak then
+        return aliases[weak] or weak
+    end
+    return nil
+end
+
+local function unitIsLandingTarget(unit)
+    if unit == "target" then
+        syncTarget()
+        if targetKey == landing.key then
+            return true
+        end
+    end
+    local key = keyOfUnit(unit)
+    return key ~= nil and key == landing.key
+end
+
+-- one word weighed against the landing in question; returns the verdict it got
+local function judge(unit, action, flagText, amount, school, at, before)
+    if ns.AnySecret(unit, action) or type(action) ~= "string" or type(unit) ~= "string" then
+        return "unreadable"
+    end
+    if at > landing.deadline then
+        return "too late"
+    end
+    if not unitIsLandingTarget(unit) then
+        return "another unit"
+    end
+    local schoolPlain = not ns.IsSecret(school) and type(school) == "number"
+    local sameSchool
+    if landing.school then
+        -- the spell's school; a miss the client reports with no school at all (0) is taken as ours too
+        sameSchool = schoolPlain and (school == landing.school or (school == 0 and MISSED[action] ~= nil))
+    else
+        sameSchool = not schoolPlain or school ~= 1 -- a spell nobody listed: anything but a swing's school
+    end
+    if not sameSchool then
+        return "another school"
+    end
+    local amountPlain = not ns.IsSecret(amount) and type(amount) == "number"
+    local flagPlain = not ns.IsSecret(flagText) and type(flagText) == "string"
+    local missed = MISSED[action] or (action == "WOUND" and amountPlain and amount == 0 and flagPlain and not LANDED_FLAGS[flagText]) or false
+    local hit = action == "WOUND" and amountPlain and amount > 0
+    if not missed and not hit then
+        return "no verdict in it"
+    end
+    local spells = applied[landing.key]
+    local entry = spells and spells[landing.spell]
+    if entry and entry.serial == landing.serial then
+        if missed then
+            spells[landing.spell] = nil
+            Dots.stats.notLanded = Dots.stats.notLanded + 1
+            ns:Log("dot_not_landed", { spell = entry.name, action = action, flag = flagPlain and flagText or nil, unit = unit, before = before or nil })
+            local how = action == "WOUND" and (flagText ~= "" and flagText or "MISS") or action
+            note({ spell = entry.name, seconds = entry.total, source = "cast - " .. string.lower(how) .. ", not landed", guid = true })
+        else
+            entry.source = "cast, landed"
+            Dots.stats.landed = Dots.stats.landed + 1
+        end
+    end
+    landing = nil
+    return (missed and "not landed" or "landed") .. (before and " (the word came before the cast)" or "")
+end
+
+-- a cast just armed: the words of the last half second may already have told
+lookBack = function(at)
+    for index = #recentWords, 1, -1 do
+        local word = recentWords[index]
+        if at - word.t > LOOK_BACK_SECONDS then
+            break
+        end
+        if landing and not word.weighed then -- a word weighed for an earlier cast is spent
+            word.weighed = true
+            local spell, kind = landing.spell, kindOf(landing.key)
+            local verdict = judge(word.unit, word.action, word.flag, word.amount, word.school, word.t, true)
+            noteLanding(word.unit, word.action, word.flag, word.amount, word.school, verdict, spell, kind)
+            if not landing then
+                return
+            end
+        end
+    end
+end
+
+local function onUnitCombat(_, unit, action, flagText, amount, school)
+    local at = now()
+    local word = { t = at, unit = unit, action = action, flag = flagText, amount = amount, school = school }
+    recentWords[#recentWords + 1] = word
+    if #recentWords > RECENT_WORDS_MAX then
+        table.remove(recentWords, 1)
+    end
+    if not landing then
+        return
+    end
+    word.weighed = true -- weighed now, for this cast: never again for the next
+    local spell, kind = landing.spell, kindOf(landing.key)
+    local verdict = judge(unit, action, flagText, amount, school, at, false)
+    noteLanding(unit, action, flagText, amount, school, verdict, spell, kind)
+    if verdict == "too late" then
+        word.weighed = nil -- that cast is over: the word may yet be the next cast's
+        settleLanding(at)
+    end
+end
+
+ns:On("UNIT_COMBAT", onUnitCombat)
 ns:OnPlayerUnit("UNIT_SPELLCAST_SUCCEEDED", onCast) -- the client filters it to you
 ns:OnPlayerUnit("UNIT_SPELLCAST_START", onCastStart)
 ns:OnPlayerUnit("UNIT_SPELLCAST_STOP", onCastEnd) -- (after a SUCCEEDED too: by then the key was taken and the entry is gone)
@@ -699,6 +900,8 @@ function Dots:Report()
         targetKey = keyKind(targetKey),
         standIns = self.stats.standIns or 0, skipped = self.stats.skipped or 0,
         dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
+        landing = { landed = self.stats.landed, notLanded = self.stats.notLanded, unknown = self.stats.landingUnknown, pending = landing ~= nil,
+            samples = self.landingSamples },
         expected = COMBO_SECONDS, tracked = self:GetTracked() }
 end
 

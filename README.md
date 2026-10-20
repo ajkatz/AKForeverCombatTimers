@@ -6,14 +6,32 @@
 Swing timers and cast bars for **World of Warcraft: Forever** (Interface `16001`), in one block.
 
 - **Your swings** - main hand, off hand and ranged, each on its own bar, driven by the
-  client's own swing API. Replaces Blizzard's built-in timer (and puts it back on request).
+  client's own swing API. Replaces Blizzard's built-in timer (and puts it back on request). A bow, gun,
+  crossbow or thrown weapon spends the **last half second of every cycle aiming** - stand still for it,
+  or the shot waits - so its ranged bar runs in two phases: the **wait** (the cycle less the aim) fills
+  the bar as a swing does, then the **aim** fills it again, quickly, as a red cast of half a second
+  labelled "Aim". The wait is yours for a cast or a step. A wand has no aim and runs one plain phase.
+  The aim follows your feet: it runs only while you stand still, a step restarts it, and once aimed the bar
+  holds "aimed" until the shot's own event comes - the cooldown's end is not the shot. The feet are heard
+  through the client's own `PLAYER_STARTED_MOVING` / `PLAYER_STOPPED_MOVING` events: `GetUnitSpeed` is a
+  secret in a fight on this client. A wand winds up the same half second before each shot (measured: a
+  wand's first shot came 0.63 s after the switch-on, a gun's 0.63 s), shown as a red "Wind-up" under the
+  same rules for the feet; whether a step delays a wand's shot as it delays a gun's is still being measured
+  (`autoShot.shotsWhileMoving` in `/fct diag`).
+  The first shot of an engagement has no swing event before it, so its aim runs from the moment Auto Shot
+  is switched on (`START_AUTOREPEAT_SPELL`); how long the first shot then took to come is kept in `/fct diag`.
+  Switched off, the bar goes down, but the game's cooldown runs on: switched on again, the bar picks the cycle
+  up where it stands, its wait first, and the half second never runs before the cooldown is up nor before
+  the switch-on itself.
 - **The enemy's swings** - a bar counting down to the next hit on you, or on the tank your
   target is attacking, or on the friendly you have targeted as a healer.
 - **Cast bars** (v0.3) - the target's cast on top of the block, your own cast at the bottom: spell
   icon, name, seconds left. Blizzard's two cast bars are switched off once ours has proven it works.
 - **Planned: heal timing** - mark when to start a heal so it lands just after the hit.
 
-Status: **v0.5.0 (2026-09-25)** - the first public release. New in it, and not yet checked in the game: the DoT bars
+Status: **v0.5.4 (2026-10-19)** - the hunter's aim on the ranged bar (checked in the game on a gun and a wand), a mob
+known again when you tab back to it in a fight, and - new and not yet checked in the game - the rule that a resisted
+DoT draws no bar. Earlier: **v0.5.0 (2026-09-25)** - the first public release. New in it, and not yet checked in the game: the DoT bars
 and the reactive windows (see their sections; Rupture and Rip lengths and the Overpower attribution are the parts to
 watch, and `/fct dot` says what the game has taught it). Confirmed in the game on 2026-09-20:
 *Slice and Dice* stays on the buff bar for its WHOLE duration in a fight (see *The buff bar*). Your own swing bars stand on a verified API and work in the game;
@@ -210,6 +228,14 @@ client itself says auras are not secret right now - a tracked DoT the aura walk 
 over (dispelled, ended early); when the walk is refused or auras are hidden, an empty walk proves nothing and
 nothing is dropped. Where the client will not give a readable
 GUID - an enemy player, most likely - nothing is filed at all, rather than guessing whose DoT it was.
+
+**A resisted cast draws no bar.** A cast that succeeded may still have been resisted. The combat log is shut
+to addons, but `UNIT_COMBAT` is not: it names what just happened to the target, and it comes in the same
+breath as the cast's success. So for a second after a DoT is cast the target's word is waited for - a
+resist, immunity or miss in the spell's school takes the bar down again; damage of that school marks it
+landed; a swing or another school at the same moment says nothing, and a word a second late is some other
+spell's. Bleeds (Rend, Rupture, Rip) are physical like a white swing, so their miss cannot be told apart and
+nothing is waited for.
 
 ## Reactive windows
 

@@ -2,6 +2,26 @@
 
 ## 0.5.4
 
+- **The hunter's aim on the ranged bar.** A bow, gun, crossbow or thrown weapon spends the last half
+  second of every cycle aiming, and the shot waits if you move then. The ranged bar now runs in two
+  phases: the wait (the cycle less the aim) fills it as a swing does, then the aim fills it again as a
+  quick red cast of half a second labelled "Aim". The wait is yours for a cast or a step. The weapon in
+  the ranged slot decides; a wand winds up the same half second before each shot, shown as a red
+  "Wind-up" (measured: a wand's first shot comes 0.63 s after the switch-on, a gun's 0.63 s). The first
+  shot of an engagement has no swing event before it, so its aim runs from the moment Auto Shot is switched
+  on. Switched off, the bar goes down while the game's cooldown runs on; switched on again, the bar picks
+  the cycle up where it stands - the half second never runs before the cooldown is up, nor before the
+  switch-on. The aim follows your feet: it runs only while you stand still, a step restarts it, and once
+  aimed the bar holds "aimed" until the shot's own event (the feet heard through the client's movement
+  events, since the speed is a secret in a fight). Checked in the game on a gun and a wand.
+- **A resisted DoT draws no bar** (new, and not yet checked in the game). A Flame Shock the mob resisted
+  still started a twelve-second bar, since the cast itself had succeeded. Now the target's own word is
+  waited for: within a second of the cast - or half a second before its success - a resist, immunity or
+  miss in the spell's school (UNIT_COMBAT, the one combat event this client leaves to addons, under
+  whatever unit token names the mob) takes the bar down again, and damage of that school marks it landed.
+  A swing or another school at the same moment says nothing, and a word a second late is some other
+  spell's. Bleeds (Rend, Rupture, Rip) are left as they were: physical, like a white swing, so their miss
+  cannot be told apart. `/fct diag` counts landed, not landed and unknown, and keeps the words it weighed.
 - **Tab away and back in a fight, and the bars are there.** The client keeps a target's identity secret in a
   fight, and 0.5.3 answered with a stand-in that could not recognise a mob you came back to. Now a mob is
   known by its nameplate while the plate is up (the frame outlives the switch), failing that by its name
