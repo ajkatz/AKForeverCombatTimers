@@ -27,6 +27,9 @@ Swing timers and cast bars for **World of Warcraft: Forever** (Interface `16001`
   target is attacking, or on the friendly you have targeted as a healer.
 - **Cast bars** (v0.3) - the target's cast on top of the block, your own cast at the bottom: spell
   icon, name, seconds left. Blizzard's two cast bars are switched off once ours has proven it works.
+- **Interrupts** (v0.5.5) - when somebody stops a cast (your target's, or a mob yours), the cast bar holds
+  for a second and a half, full and red: a white flash, "INTERRUPTED" slamming down with a shake, and who did
+  it in their class colour. A cast its own caster stopped just ends.
 - **Planned: heal timing** - mark when to start a heal so it lands just after the hit.
 
 Status: **v0.5.4 (2026-10-19)** - the hunter's aim on the ranged bar (checked in the game on a gun and a wand), a mob
@@ -120,6 +123,7 @@ On first login the bars are unlocked: drag the blue area, then `/fct lock`.
 | `/fct watch auto` / `focus` / `party2` ... | whose incoming hits to time (default: auto) |
 | `/fct casts on` / `off`, `casts player on|off`, `casts target on|off` | the cast bars (default: both on) |
 | `/fct casts blizzard show` / `hide` | Blizzard's own cast bars (default: hidden once ours has shown a cast; `show` puts them straight back) |
+| `/fct interrupts on` / `off`, `interrupts test` | an interrupt held on the cast bar (default: on); `test` shows one on the target's bar |
 | `/fct blizzard hide` / `show` | Blizzard's own swing timer (default: hidden, via the `showSwingTimer` CVar) |
 | `/fct diag` | snapshot everything measured into SavedVariables, then `/reload` |
 

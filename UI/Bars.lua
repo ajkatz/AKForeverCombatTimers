@@ -56,6 +56,19 @@ local COLORS = {
     PLAINS = { 0.45, 0.80, 0.45 }, -- (Plainsrunning recolours it: green while it grows, red while it drains)
 }
 
+-- An interrupt by somebody else (Casts.lua decides which): the bar holds, full and red, the spell's icon grey;
+-- a white flash; "INTERRUPTED" slams down from twice its size and shakes; who did it stands on the right.
+local INTERRUPT = {
+    color = { 0.80, 0.07, 0.05 },
+    word = "INTERRUPTED",
+    flash = 0.25,     -- seconds of the white flash
+    slam = 0.12,      -- seconds for the word to land ...
+    slamFrom = 2.2,   -- ... from this size
+    shake = 0.4,      -- seconds of the shake
+    shakePixels = 4,
+    shakeHz = 18,
+}
+
 -- Bars whose content is a "timed thing with a name and an icon": where that thing comes from.
 local SOURCES = {
     CAST = function(now) return Casts:Get("player", now) end,
@@ -293,9 +306,119 @@ local function startCountdown(bar, cast)
     return "none"
 end
 
+------------------------------------------------------------------------
+-- Interrupted: the drama. One overlay per cast bar, made the first time it is needed; it is a child of the
+-- bar, so it fades and hides with it. Every frame of the hold until it settles: the flash fades, the word
+-- lands and shakes. Nothing about the interrupter is read here - its name goes onto the font string as
+-- Casts.lua received it (a secret, in a fight), its class colour only when the client gave the class plainly.
+------------------------------------------------------------------------
+local function dramaFont()
+    return STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+end
+
+local function createDrama(bar)
+    local drama = CreateFrame("Frame", nil, bar)
+    drama:SetAllPoints(bar)
+    drama:SetFrameLevel((bar.status:GetFrameLevel() or 1) + 5) -- over the bar's own text
+    drama.flash = drama:CreateTexture(nil, "OVERLAY")
+    drama.flash:SetAllPoints(bar.status)
+    drama.flash:SetColorTexture(1, 1, 1, 1)
+    drama.flash:SetBlendMode("ADD")
+    drama.flash:SetAlpha(0)
+    drama.stamp = CreateFrame("Frame", nil, drama) -- the word's own frame, so that it can be scaled
+    drama.stamp:SetSize(1, 1)
+    drama.word = drama.stamp:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    drama.word:SetPoint("LEFT", drama.stamp, "LEFT", 0, 0)
+    drama.word:SetText(INTERRUPT.word)
+    drama.who = drama:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    drama.who:SetPoint("RIGHT", bar.status, "RIGHT", -4, 0)
+    drama.who:SetJustifyH("RIGHT")
+    drama:Hide()
+    bar.drama = drama
+    return drama
+end
+
+-- back to an ordinary cast bar: a new cast, the idle look, the test bars
+local function clearInterrupt(bar)
+    if not bar.interruptShown then
+        return
+    end
+    bar.interruptShown = false
+    local color = COLORS[bar.key]
+    bar.status:SetStatusBarColor(color[1], color[2], color[3], 0.9)
+    bar.icon:SetDesaturated(false)
+    bar.label:Show()
+    if bar.drama then
+        bar.drama:Hide()
+    end
+end
+
+local function armInterrupted(bar, state)
+    releaseCountdown(bar)
+    local status = bar.status
+    status:SetMinMaxValues(0, 1) -- whatever drove the bar, the client's timer or our numbers, stops here
+    status:SetValue(1)
+    local red = INTERRUPT.color
+    status:SetStatusBarColor(red[1], red[2], red[3], 1)
+    bar.spark:Hide()
+    bar.time:SetText("")
+    bar.label:Hide() -- the word takes its place
+    if not pcall(bar.icon.SetTexture, bar.icon, state.texture) then
+        bar.icon:SetTexture(UNKNOWN_ICON)
+    end
+    bar.icon:SetDesaturated(true)
+    bar.fraction, bar.path = 1, "interrupted"
+    local drama = bar.drama or createDrama(bar)
+    local height = bar.height or 14
+    pcall(drama.word.SetFont, drama.word, dramaFont(), math.max(12, math.floor(height + 4)), "THICKOUTLINE")
+    pcall(drama.who.SetFont, drama.who, dramaFont(), math.max(9, math.floor(height * 0.75)), "OUTLINE")
+    local info = state.interrupted
+    if not (info.hasName and pcall(drama.who.SetText, drama.who, info.by)) then
+        drama.who:SetText("")
+    end
+    local classColor = info.class and type(RAID_CLASS_COLORS) == "table" and RAID_CLASS_COLORS[info.class]
+    if type(classColor) == "table" and type(classColor.r) == "number" then
+        drama.who:SetTextColor(classColor.r, classColor.g, classColor.b)
+    else
+        drama.who:SetTextColor(1, 1, 1)
+    end
+    drama.scale, drama.dx, drama.settled = nil, nil, false
+    drama:Show()
+    bar.interruptShown = true
+end
+
+local function animateInterrupt(bar, state, now)
+    local drama = bar.drama
+    if not drama or drama.settled then
+        return
+    end
+    local I = INTERRUPT
+    local t = math.max(0, now - state.interrupted.at)
+    local white = t < I.flash and (1 - t / I.flash) or 0
+    drama.flash:SetAlpha(0.9 * white)
+    drama.word:SetTextColor(1, 0.2 + 0.8 * white, 0.15 + 0.85 * white) -- white in the flash, then red
+    local scale = 1
+    if t < I.slam then
+        local left = 1 - t / I.slam
+        scale = 1 + (I.slamFrom - 1) * left * left
+    end
+    local dx = 0
+    if t < I.shake then
+        dx = I.shakePixels * (1 - t / I.shake) * math.sin(t * I.shakeHz * 2 * math.pi)
+    end
+    if scale ~= drama.scale or dx ~= drama.dx then
+        drama.scale, drama.dx = scale, dx
+        drama.stamp:SetScale(scale)
+        drama.stamp:ClearAllPoints()
+        drama.stamp:SetPoint("LEFT", bar.status, "LEFT", (4 + dx) / scale, 0) -- (a scaled frame's offsets count in its own units)
+    end
+    drama.settled = t >= math.max(I.flash, I.slam, I.shake)
+end
+
 -- A new (or pushed back) cast: hand name, icon and - when we may not read them - the times to the
 -- widgets. Name and icon may be secret: they go straight in, inside a pcall, and are never looked at.
 local function armCastBar(bar, cast)
+    clearInterrupt(bar)
     if not pcall(bar.label.SetText, bar.label, cast.name) then
         bar.label:SetText(cast.fallbackLabel or (cast.kind == "channel" and "Channeling" or "Casting"))
     end
@@ -331,6 +454,7 @@ local function armCastBar(bar, cast)
 end
 
 local function setIdleLook(bar)
+    clearInterrupt(bar)
     bar.status:SetMinMaxValues(0, 1)
     bar.status:SetValue(0)
     bar.spark:Hide()
@@ -347,6 +471,7 @@ local function updateTimedBar(bar, now, testing)
         local elapsed = (now - (testUntil - 15)) % cycle
         if bar.serial ~= "test" then
             bar.serial = "test"
+            clearInterrupt(bar)
             releaseCountdown(bar)
             bar.status:SetMinMaxValues(0, 1)
             bar.label:SetText(Settings.LABELS[bar.key])
@@ -377,7 +502,15 @@ local function updateTimedBar(bar, now, testing)
     bar.idleLook = false
     if bar.serial ~= state.serial then
         bar.serial = state.serial
-        armCastBar(bar, state)
+        if state.interrupted then
+            armInterrupted(bar, state)
+        else
+            armCastBar(bar, state)
+        end
+    end
+    if state.interrupted then
+        animateInterrupt(bar, state, now)
+        return true
     end
     if bar.path == "numbers" then
         showFraction(bar, state.owner:GetProgress(state, now))

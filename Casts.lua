@@ -24,10 +24,18 @@ local UNITS = { "player", "target" }
 local SECRET_CAP = 120 -- a cast we cannot time is dropped after this long, whatever happens
 local OVERRUN = 0.3    -- a timed cast is dropped this long after its end if no event said so
 local MAX_SAMPLES = 16
+-- AN INTERRUPT by somebody else holds the bar for HOLD seconds, full and red, "INTERRUPTED" and who did it
+-- (UI/Bars.lua draws it). A cast stopped by its own caster - a step, Escape, another spell - just ends.
+local HOLD = 1.6
+local LOOKBACK = 0.5     -- an interrupt that comes just after the cast's STOP still finds the cast
+local MAX_INTERRUPTS = 8
 
 Casts.UNITS = UNITS
 Casts.current = {} -- [unit] = cast
 Casts.samples = {} -- for /fct diag: what the client really handed us
+Casts.HOLD = HOLD
+Casts.interrupts = {} -- for /fct diag: every interrupt heard, whether it was shown, and why not
+Casts.lastEnded = {}  -- [unit] = { cast, at }: the cast that just ended, for an interrupt that comes after it
 local serial = 0
 
 local BAR_OF = { player = "CAST", target = "TCAST" }
@@ -209,6 +217,13 @@ function Casts:Get(unit, now)
         return nil
     end
     now = now or GetTime()
+    if cast.interrupted then
+        if now - cast.interrupted.at > HOLD then
+            self.current[unit] = nil
+            return nil
+        end
+        return cast
+    end
     if cast.timesReadable then
         if now > cast.endTime + OVERRUN then
             self.current[unit] = nil
@@ -248,6 +263,110 @@ end
 
 function Casts:IsProven(unit)
     return ns.db and ns.db.castProven and ns.db.castProven[unit] and true or false
+end
+
+------------------------------------------------------------------------
+-- INTERRUPTED (the user, 2026-10-20: "a dramatic way to show when someone else interrupts and the cast bar
+-- stops"). On this client UNIT_SPELLCAST_INTERRUPTED and UNIT_SPELLCAST_CHANNEL_STOP carry `interruptedBy`:
+-- the GUID of whoever stopped the cast - a secret, for the target's casts in a fight. A secret is never
+-- looked at, not even tested: it goes to UnitNameFromGUID and UnitClassFromGUID (both documented to take one
+-- from an addon), and the name that comes back goes straight onto the bar. A plain GUID is compared with the
+-- caster's own: a cast its caster stopped is no interrupt. Nor is the cast of a target that died.
+------------------------------------------------------------------------
+-- did somebody else stop it? true, or false and why not
+local function stoppedByOther(unit, by)
+    if not ns.IsSecret(by) then
+        if type(by) ~= "string" or by == "" then
+            return false, "nobody named"
+        end
+        local ok, own = pcall(UnitGUID, unit)
+        if ok and not ns.IsSecret(own) and own == by then
+            return false, "the caster itself"
+        end
+    end
+    if unit ~= "player" then
+        local ok, dead = pcall(UnitIsDeadOrGhost, unit)
+        if ok and not ns.IsSecret(dead) and dead == true then
+            return false, "the caster died"
+        end
+    end
+    return true
+end
+
+-- the interrupter's name (plain or secret: only ever handed to a font string), whether there is one, and its
+-- class file name (plain, or nil)
+local function whoStopped(by)
+    local name, hasName, classFile = nil, false, nil
+    if type(UnitNameFromGUID) == "function" then
+        local ok, value = pcall(UnitNameFromGUID, by)
+        if ok and (ns.IsSecret(value) or (type(value) == "string" and value ~= "")) then
+            name, hasName = value, true
+        end
+    end
+    if type(UnitClassFromGUID) == "function" then
+        local ok, _, file = pcall(UnitClassFromGUID, by)
+        if ok and not ns.IsSecret(file) and type(file) == "string" and file ~= "" then
+            classFile = file
+        end
+    end
+    return name, hasName, classFile
+end
+
+local function noteInterrupt(entry)
+    local list = Casts.interrupts
+    list[#list + 1] = entry
+    while #list > MAX_INTERRUPTS do
+        table.remove(list, 1)
+    end
+end
+
+-- An interrupt event. true: the cast is held as interrupted for a moment; false: it simply ends.
+function Casts:Interrupted(unit, event, by)
+    local now = GetTime()
+    local shown, why = stoppedByOther(unit, by)
+    if shown and not ns:GetOption("interruptDrama") then
+        shown, why = false, "switched off"
+    end
+    local source = self.current[unit]
+    if not source then
+        local last = self.lastEnded[unit]
+        source = last and now - last.at <= LOOKBACK and last.cast or nil -- the STOP came first
+    end
+    if shown and not source then
+        shown, why = false, "no cast to hold"
+    end
+    noteInterrupt({ unit = unit, event = event, t = math.floor(now * 10) / 10, secretBy = ns.IsSecret(by),
+        combat = InCombatLockdown() and true or false, shown = shown, why = why })
+    if not shown then
+        return false
+    end
+    local name, hasName, classFile = whoStopped(by)
+    serial = serial + 1
+    self.current[unit] = {
+        unit = unit, kind = source.kind, name = source.name, texture = source.texture, spellID = source.spellID,
+        serial = serial, began = now, owner = Casts, drains = source.drains, fromItem = source.fromItem,
+        interrupted = { at = now, by = name, hasName = hasName, class = classFile },
+    }
+    self.lastEnded[unit] = nil
+    ns:Log("cast_interrupted", { unit = unit, event = event, secretBy = ns.IsSecret(by), named = hasName, class = classFile })
+    return true
+end
+
+-- '/fct interrupts test': the target's bar as an interrupt leaves it - a Shadow Bolt, stopped by you
+function Casts:TestInterrupt(unit)
+    unit = unit or "target"
+    if not enabled(unit) then
+        return false
+    end
+    local okName, name = pcall(UnitName, "player")
+    name = okName and type(name) == "string" and not ns.IsSecret(name) and name or nil
+    local okClass, _, classFile = pcall(UnitClass, "player")
+    classFile = okClass and type(classFile) == "string" and not ns.IsSecret(classFile) and classFile or nil
+    local now = GetTime()
+    serial = serial + 1
+    self.current[unit] = { unit = unit, kind = "cast", name = "Shadow Bolt", texture = 136197, serial = serial,
+        began = now, owner = Casts, interrupted = { at = now, by = name, hasName = name ~= nil, class = classFile, test = true } }
+    return true
 end
 
 ------------------------------------------------------------------------
@@ -294,18 +413,36 @@ for _, event in ipairs(STARTS) do
     isStart[event] = true
 end
 
-local function onEvent(unit, event, payloadUnit, _, payloadSpell)
+-- (INTERRUPTED and CHANNEL_STOP: unit, cast GUID, spell id, interruptedBy, cast bar id. STOP has no
+-- interruptedBy: its fourth value is the cast bar id.)
+local CARRIES_INTERRUPTER = { UNIT_SPELLCAST_INTERRUPTED = true, UNIT_SPELLCAST_CHANNEL_STOP = true }
+
+local function onEvent(unit, event, payloadUnit, _, payloadSpell, interruptedBy)
     if isStart[event] then
-        refresh(unit, event, payloadUnit, payloadSpell)
-    elseif event == FAILED then
+        refresh(unit, event, payloadUnit, payloadSpell) -- (a new cast also ends the hold of an interrupted one)
+        return
+    end
+    local current = Casts.current[unit]
+    if current and current.interrupted then
+        return -- the interrupted cast holds its moment: the STOP or FAILED that follows changes nothing
+    end
+    if event == FAILED then
         -- Also fires for a spell you tried to cast WHILE casting; the running cast goes on. Only
         -- believe it when the client agrees that nothing is being cast any more.
         if not ask(unit) then
             Casts.current[unit] = nil
         end
-    else
-        Casts.current[unit] = nil
+        return
     end
+    -- a channel that simply ran out names nobody: its interruptedBy is nil, which is never a secret
+    if CARRIES_INTERRUPTER[event] and (event == "UNIT_SPELLCAST_INTERRUPTED" or ns.IsSecret(interruptedBy) or interruptedBy ~= nil)
+        and Casts:Interrupted(unit, event, interruptedBy) then
+        return
+    end
+    if current then
+        Casts.lastEnded[unit] = { cast = current, at = GetTime() }
+    end
+    Casts.current[unit] = nil
 end
 
 for _, unit in ipairs(UNITS) do
@@ -324,6 +461,7 @@ end
 
 -- A new target may be in the middle of a cast.
 ns:On("PLAYER_TARGET_CHANGED", function()
+    Casts.lastEnded.target = nil -- the last target's cast is no business of the new one's
     refresh("target", "PLAYER_TARGET_CHANGED")
 end)
 
@@ -366,6 +504,21 @@ ns:RegisterCommand("casts", "cast bars: 'on' / 'off' (both), 'player on|off', 't
     end
     ns:Print("cast bars - yours:", Settings.MODE_LABELS[Settings:GetMode("CAST")], "| target:", Settings.MODE_LABELS[Settings:GetMode("TCAST")],
         "| Blizzard's:", ns:GetOption("hideBlizzardCastBars") and "hidden once ours has shown a cast" or "left alone")
+end)
+
+ns:RegisterCommand("interrupts", "an interrupt by somebody else, held on the cast bar: 'on' / 'off'; 'test' shows one", function(rest)
+    local what = string.lower(string.match(rest or "", "^%s*(%S*)") or "")
+    if what == "test" then
+        if not Casts:TestInterrupt("target") then
+            ns:Print("the target's cast bar is switched off: |cffffd100/fct casts target on|r first.")
+        end
+        return
+    elseif what == "on" or what == "off" then
+        ns:SetOption("interruptDrama", what == "on")
+    elseif what ~= "" then
+        ns:Print("usage: /fct interrupts on | off | test")
+    end
+    ns:Print("interrupts:", ns:GetOption("interruptDrama") and "held on the cast bar - red, with who did it" or "not shown - the bar just ends")
 end)
 
 ns:RegisterCommand("castlog", "the last few casts this addon saw: which spell, how long, and whether it made it onto the bar", function()

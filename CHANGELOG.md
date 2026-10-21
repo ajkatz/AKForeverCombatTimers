@@ -1,5 +1,16 @@
 # AKForeverCombatTimers
 
+## 0.5.5
+
+- **An interrupt you can see** (new, not yet checked in the game). When somebody stops a cast - your target's,
+  or a mob stops yours - the cast bar no longer just vanishes: it holds for a second and a half, full and red,
+  the spell's icon gone grey. A white flash; "INTERRUPTED" slams down from twice its size and shakes; who did
+  it stands on the right in their class colour. The client keeps the interrupter of an enemy's cast secret in a
+  fight: its name goes onto the bar as the client hands it over, never read. A cast its own caster stopped (a
+  step, Escape), a cast nobody stopped and the cast of a mob that died just end, as before; a new cast ends the
+  hold at once. `/fct interrupts on|off` (on by default), `/fct interrupts test` shows one on the target's bar.
+  `/fct diag` keeps the last few interrupts heard: shown or why not, and whether the interrupter was secret.
+
 ## 0.5.4
 
 - **The hunter's aim on the ranged bar.** A bow, gun, crossbow or thrown weapon spends the last half

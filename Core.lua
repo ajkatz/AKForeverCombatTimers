@@ -203,6 +203,7 @@ local OPTION_DEFAULTS = {
     locked = false,
     hideBlizzard = true,
     hideBlizzardCastBars = true, -- Blizzard's own two cast bars go once ours has proven itself
+    interruptDrama = true,       -- an interrupt by somebody else holds the cast bar, red, with who did it
     -- what each bar does (always / when used / never, size, order ...) lives in BarSettings.lua
     -- watchUnit = nil      -- nil: auto; otherwise a unit token such as "focus"
 }

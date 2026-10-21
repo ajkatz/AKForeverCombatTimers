@@ -896,6 +896,139 @@ scenario("cast bars: idle rows stay reserved, so nothing jumps when somebody sta
     equal(bars.CAST:IsShown(), false); equal(bars.TCAST:IsShown(), false)
 end)
 
+scenario("an interrupt by somebody else: the target's cast bar holds a moment - full and red, its icon grey - while 'INTERRUPTED' flashes white, lands from twice its size and shakes, and who did it stands on the right in their class colour; the STOP after it changes nothing; then it goes, and the next cast is an ordinary bar", function()
+    local ns = start({ people = { ["Player-0-0-0-0-77"] = { name = "Stabby", class = "ROGUE" } } })
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
+    local bar = ns.Bars.bars.TCAST
+    Mock.cast("target", { name = "Shadow Bolt", texture = 136197, seconds = 3 })
+    run(ns, 1)
+    equal(bar:IsShown(), true)
+    Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED", "Player-0-0-0-0-77")
+    Mock.fireUnit("UNIT_SPELLCAST_STOP", "target", "target", "Cast-1", 133) -- the client's STOP that follows
+    ns.Bars:Update()
+    equal(bar:IsShown(), true, "the bar holds"); equal(bar.path, "interrupted")
+    local drama = bar.drama
+    check(drama and drama:IsShown(), "the drama is on")
+    equal(drama.word:GetText(), "INTERRUPTED"); equal(drama.who:GetText(), "Stabby")
+    equal(drama.who.__textColor[1], 1); near(drama.who.__textColor[2], 0.96, 0.001, "a rogue's yellow")
+    equal(bar.status.__value, 1, "full"); equal(bar.status.__statusColor[1], 0.80); equal(bar.status.__statusColor[2], 0.07)
+    equal(bar.icon.__desaturated, true, "the spell's icon goes grey"); equal(bar.icon.__texture, 136197)
+    equal(bar.label:IsShown(), false, "the word takes the label's place")
+    near(drama.flash:GetAlpha(), 0.9, 0.001, "the flash at its brightest")
+    near(drama.stamp:GetScale(), 2.2, 0.001, "the word lands from more than twice its size")
+    equal(drama.word.__textColor[2], 1, "white in the flash")
+    run(ns, 0.15)
+    equal(drama.stamp:GetScale(), 1, "landed")
+    local _, _, _, x = drama.stamp:GetPoint(1)
+    check(math.abs(x - 4) > 0.5, "shaking: " .. tostring(x))
+    run(ns, 0.3)
+    equal(drama.flash:GetAlpha(), 0, "the flash is over")
+    _, _, _, x = drama.stamp:GetPoint(1)
+    equal(x, 4, "still")
+    near(drama.word.__textColor[2], 0.2, 0.001, "red")
+    equal(bar:IsShown(), true, "holding")
+    run(ns, 1.2)
+    equal(bar:IsShown(), false, "gone after the hold")
+    Mock.cast("target", { name = "Fireball", texture = 135812, seconds = 2 })
+    ns.Bars:Update()
+    equal(bar:IsShown(), true); equal(bar.label:IsShown(), true); equal(bar.label:GetText(), "Fireball")
+    equal(drama:IsShown(), false); equal(bar.icon.__desaturated, false); equal(bar.status.__statusColor[1], 0.95, "its own colour again")
+    local entry = ns.Casts.interrupts[#ns.Casts.interrupts]
+    equal(entry.shown, true); equal(entry.secretBy, false); equal(entry.unit, "target")
+end)
+
+scenario("an interrupt in a fight: the interrupter's GUID is a secret - never tested, its name handed to the bar as it comes; a cast nobody stopped, one its own caster stopped and a dead mob's just end; your own bar holds for a mob's interrupt, not for your step or Escape; a channel somebody stopped holds, one that ran out does not; a STOP first still finds its cast; a new cast ends the hold; '/fct interrupts off' and 'test'; the report keeps them", function()
+    local ns, state = start({ people = { ["Player-0-0-0-0-77"] = { name = "Stabby", class = "ROGUE" },
+        ["Creature-0-0-0-0-9-1"] = { name = "Defias Pillager" } } })
+    SlashCmdList.AKFOREVERCOMBATTIMERS("lock")
+    state.guids.target = "Creature-0-0-0-0-9-1"
+    local bars = ns.Bars.bars
+    local function last() return ns.Casts.interrupts[#ns.Casts.interrupts] end
+    Mock.setCombat(true)
+    -- a secret cast, stopped by somebody the client will not name to an addon
+    Mock.cast("target", { name = "Fireball", seconds = 3, secret = true })
+    ns.Bars:Update()
+    Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED", Mock.secretGUID("Player-0-0-0-0-77"))
+    ns.Bars:Update()
+    equal(bars.TCAST.path, "interrupted", "held")
+    equal(bars.TCAST.drama.who:GetText(), Mock.SECRET, "the name went onto the bar as the client gave it")
+    near(bars.TCAST.drama.who.__textColor[2], 0.96, 0.001, "the class colour: the client gives the class plainly")
+    equal(last().secretBy, true)
+    run(ns, 2)
+    equal(bars.TCAST:IsShown(), false)
+    -- nobody named, the caster itself: they just end
+    for _, case in ipairs({ { false, "nobody named" }, { "Creature-0-0-0-0-9-1", "the caster itself" } }) do
+        Mock.cast("target", { name = "Fireball", seconds = 3 })
+        ns.Bars:Update()
+        Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED", case[1] or nil)
+        ns.Bars:Update()
+        equal(bars.TCAST:IsShown(), false, case[2]); equal(last().why, case[2])
+    end
+    -- a mob that died mid-cast
+    Mock.cast("target", { name = "Fireball", seconds = 3 })
+    ns.Bars:Update()
+    state.dead.target = true
+    Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED", "Player-0-0-0-0-77")
+    ns.Bars:Update()
+    equal(bars.TCAST:IsShown(), false, "the mob died"); equal(last().why, "the caster died")
+    state.dead.target = nil
+    -- your own bar: a step (nobody named), Escape (yourself), then the mob's kick
+    for _, by in ipairs({ false, state.guids.player }) do
+        Mock.cast("player", { name = "Shadow Bolt", seconds = 3 })
+        ns.Bars:Update()
+        Mock.castEnd("player", "UNIT_SPELLCAST_INTERRUPTED", by or nil)
+        ns.Bars:Update()
+        equal(bars.CAST:IsShown(), false, "your own stop just ends the bar")
+    end
+    Mock.cast("player", { name = "Shadow Bolt", seconds = 3 })
+    ns.Bars:Update()
+    Mock.castEnd("player", "UNIT_SPELLCAST_INTERRUPTED", "Creature-0-0-0-0-9-1")
+    ns.Bars:Update()
+    equal(bars.CAST.path, "interrupted", "a mob's interrupt holds your bar")
+    equal(bars.CAST.drama.who:GetText(), "Defias Pillager"); equal(bars.CAST.drama.who.__textColor[2], 1, "no class: white")
+    -- a channel somebody stopped; a new cast ends the hold at once
+    Mock.cast("target", { name = "Drain Life", seconds = 5, kind = "channel" })
+    ns.Bars:Update()
+    Mock.castEnd("target", "UNIT_SPELLCAST_CHANNEL_STOP", "Player-0-0-0-0-77")
+    ns.Bars:Update()
+    equal(bars.TCAST.path, "interrupted", "a channel somebody stopped")
+    Mock.cast("target", { name = "Frostbolt", seconds = 2 })
+    ns.Bars:Update()
+    equal(bars.TCAST.label:GetText(), "Frostbolt", "the new cast"); equal(bars.TCAST.drama:IsShown(), false)
+    Mock.castEnd("target")
+    -- a channel that ran out: not even noted
+    local heard = #ns.Casts.interrupts
+    Mock.cast("target", { name = "Drain Life", seconds = 5, kind = "channel" })
+    ns.Bars:Update()
+    Mock.castEnd("target", "UNIT_SPELLCAST_CHANNEL_STOP")
+    ns.Bars:Update()
+    equal(bars.TCAST:IsShown(), false, "ran out"); equal(#ns.Casts.interrupts, heard)
+    -- the STOP first, the INTERRUPTED a moment later: the cast is still found
+    Mock.cast("target", { name = "Frostbolt", seconds = 3 })
+    ns.Bars:Update()
+    Mock.castEnd("target")
+    Mock.advance(0.1)
+    Mock.fireUnit("UNIT_SPELLCAST_INTERRUPTED", "target", "target", "Cast-1", 133, "Player-0-0-0-0-77")
+    ns.Bars:Update()
+    equal(bars.TCAST.path, "interrupted", "found after its STOP")
+    run(ns, 2)
+    -- switched off
+    SlashCmdList.AKFOREVERCOMBATTIMERS("interrupts off")
+    Mock.cast("target", { name = "Fireball", seconds = 3 })
+    ns.Bars:Update()
+    Mock.castEnd("target", "UNIT_SPELLCAST_INTERRUPTED", "Player-0-0-0-0-77")
+    ns.Bars:Update()
+    equal(bars.TCAST:IsShown(), false, "switched off"); equal(last().why, "switched off")
+    SlashCmdList.AKFOREVERCOMBATTIMERS("interrupts on")
+    -- the test: one on the target's bar, by you
+    Mock.setCombat(false)
+    SlashCmdList.AKFOREVERCOMBATTIMERS("interrupts test")
+    ns.Bars:Update()
+    equal(bars.TCAST.path, "interrupted", "the test shows one"); equal(bars.TCAST.drama.who:GetText(), (UnitName("player")))
+    local report = ns.Diagnostics:Collect()
+    check(#report.casts.interrupts > 0, "the report keeps them"); equal(report.casts.interruptDrama, true)
+end)
+
 scenario("unlocked: a lock button, so finishing does not mean remembering a command", function()
     local ns = start()
     ns.Bars:Update()

@@ -171,6 +171,13 @@ function implementations.GetWidth(self) return self.__width or 0 end
 function implementations.GetHeight(self) return self.__height or 0 end
 function implementations.EnableMouse(self, enabled) self.__mouse = enabled and true or false end
 function implementations.GetFont() return "Fonts\\FRIZQT__.TTF", 12, "" end
+-- looks the scenarios check: kept, so that they can be read back
+function implementations.SetFont(self, path, size, flags) self.__font = { path, size, flags }; return true end
+function implementations.SetTextColor(self, r, g, b, a) self.__textColor = { r, g, b, a } end
+function implementations.SetStatusBarColor(self, r, g, b, a) self.__statusColor = { r, g, b, a } end
+function implementations.SetDesaturated(self, desaturated) self.__desaturated = desaturated and true or false end
+function implementations.SetFrameLevel(self, level) self.__frameLevel = level end
+function implementations.GetFrameLevel(self) return self.__frameLevel or 1 end
 function implementations.ClearAllPoints(self) self.__points = {} end
 function implementations.GetPoint(self, index)
     local point = self.__points[index or 1]
@@ -390,6 +397,11 @@ function Mock.install(options)
     end
     G.GetTime = function() return Mock.now end
     G.InCombatLockdown = function() return state.inCombat end
+    G.STANDARD_TEXT_FONT = "Fonts\\FRIZQT__.TTF"
+    G.RAID_CLASS_COLORS = {
+        ROGUE = { r = 1, g = 0.96, b = 0.41 }, WARRIOR = { r = 0.78, g = 0.61, b = 0.43 }, MAGE = { r = 0.41, g = 0.8, b = 0.94 },
+        SHAMAN = { r = 0, g = 0.44, b = 0.87 }, WARLOCK = { r = 0.58, g = 0.51, b = 0.79 }, HUNTER = { r = 0.67, g = 0.83, b = 0.45 },
+    }
     G.date = os.date
     G.GetBuildInfo = function() return "1.60.1", "69893", "Sep 17 2026", 16001 end
     G.UISpecialFrames = {}
@@ -452,6 +464,29 @@ function Mock.install(options)
         GetNamePlates = function() local list = {} for _, plate in pairs(state.plates) do list[#list + 1] = plate end return list end,
     }
     G.UnitIsDeadOrGhost = function(unit) return state.dead[unit] == true end -- no secret flag on this one
+    -- Who a GUID is: state.people[guid] = { name, class }. Both take a secret GUID from an addon (documented
+    -- "AllowedWhenTainted"); for one, the name comes back secret and the class file name plain (it has no
+    -- secret flag in the docs).
+    local function personOf(guid)
+        if type(guid) == "table" and rawget(guid, "__secretObject") then
+            return state.people[rawget(guid, "__guid")], true
+        end
+        return state.people[guid], false
+    end
+    G.UnitNameFromGUID = function(guid)
+        local person, secret = personOf(guid)
+        if secret then
+            return Mock.SECRET, Mock.SECRET
+        end
+        return person and person.name or "", ""
+    end
+    G.UnitClassFromGUID = function(guid)
+        local person, secret = personOf(guid)
+        if not person or not person.class then
+            return nil
+        end
+        return secret and Mock.SECRET or person.class, person.class, 4
+    end
     -- The player's name as the client gives it: state.surname adds a WoW: Forever surname; state.build70170
     -- puts it in the realm slot, as the client does since Oct 1 2026 (UnitFullName("player") -> "Purrdee",
     -- "Bubson"; before: "Purrdee Bubson", "TestRealm"); state.freshLogin: no realm slot yet; state.coldLogin:
@@ -616,6 +651,7 @@ function Mock.install(options)
     -- a GUID to file an enemy under, and the debuffs standing on one
     state.guids = options.guids or { player = "Player-0-0-0-0-1" }
     state.dead = {} -- [unit] = true once it has died
+    state.people = options.people or {} -- [guid] = { name, class }: who an interrupter is
     state.secretGUIDs = options.secretGUIDs or false
     state.unitAuras = {} -- [unit] = { { name, duration, expirationTime, icon, mine } }
     local function auraSecret(aura) return state.inCombat and not aura.neverSecret end
@@ -877,15 +913,25 @@ function Mock.cast(unit, spec)
     Mock.fireUnit(event, unit, S or unit, S or "Cast-1", S or (spec.spellID or 133))
 end
 
--- event: UNIT_SPELLCAST_STOP (default), _INTERRUPTED, _CHANNEL_STOP, ...
-function Mock.castEnd(unit, event)
+-- event: UNIT_SPELLCAST_STOP (default), _INTERRUPTED, _CHANNEL_STOP, ...; interruptedBy: the GUID of whoever
+-- stopped it (INTERRUPTED and CHANNEL_STOP carry one on this client) - plain, or Mock.secretGUID(...)
+function Mock.castEnd(unit, event, interruptedBy)
     local cast = Mock.state.casts[unit]
     local S = cast and cast.secret and Mock.SECRET
     Mock.state.casts[unit] = nil
     if Mock.blizzardCastBars[unit] then
         Mock.blizzardCastBars[unit].__shown = false
     end
-    Mock.fireUnit(event or "UNIT_SPELLCAST_STOP", unit, S or unit, S or "Cast-1", S or 133)
+    if interruptedBy ~= nil then
+        Mock.fireUnit(event or "UNIT_SPELLCAST_STOP", unit, S or unit, S or "Cast-1", S or 133, interruptedBy)
+    else
+        Mock.fireUnit(event or "UNIT_SPELLCAST_STOP", unit, S or unit, S or "Cast-1", S or 133)
+    end
+end
+
+-- a GUID the client keeps from addons: issecretvalue() says true; only the client's own functions see in
+function Mock.secretGUID(guid)
+    return { __secretObject = true, __guid = guid }
 end
 
 -- The player casts a self buff: UNIT_SPELLCAST_SUCCEEDED (own casts are never secret), then UNIT_AURA.

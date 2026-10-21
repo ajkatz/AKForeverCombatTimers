@@ -397,6 +397,8 @@ function Diagnostics:Collect()
         blizzardHidden = sanitize(ns.hiddenCastBars), -- [unit] = "park" | "shrink"
         blizzardFrames = castFrames,
         samples = sanitize(ns.Casts.samples),
+        interrupts = sanitize(ns.Casts.interrupts), -- every interrupt heard: shown, or why not; was its interrupter secret
+        interruptDrama = ns:GetOption("interruptDrama"),
         castingNow = try(UnitCastingInfo, "player"),
     }
 
