@@ -54,6 +54,8 @@ local COLORS = {
     REACT2 = { 0.95, 0.55, 0.20 },
     REACT3 = { 0.85, 0.35, 0.20 },
     PLAINS = { 0.45, 0.80, 0.45 }, -- (Plainsrunning recolours it: green while it grows, red while it drains)
+    RESTED = { 0.45, 0.65, 0.95 }, -- the sleeping bag's Well Rested count-up
+    FED = { 0.90, 0.60, 0.25 },    -- eating buff food: the count-up to Well Fed
 }
 
 -- An interrupt by somebody else (Casts.lua decides which): the bar holds, full and red, the spell's icon grey;
@@ -83,7 +85,7 @@ local SOURCES = {
     REACT3 = function(now) return ns.Reactive and ns.Reactive:Get(3, now) or nil end,
 }
 local TEST_CYCLES = { ENEMY = 2.0, MH = 2.6, OH = 1.7, RG = 3.0, CAST = 2.5, TCAST = 3.2, BUFF = 9.0,
-    PLAINS = 6.0, DOT1 = 12.0, DOT2 = 15.0, DOT3 = 18.0, DOT4 = 24.0,
+    PLAINS = 6.0, RESTED = 8.0, FED = 10.0, DOT1 = 12.0, DOT2 = 15.0, DOT3 = 18.0, DOT4 = 24.0,
     REACT1 = 5.0, REACT2 = 5.0, REACT3 = 5.0 }
 
 local root, upper, lower -- the seam (what moves), and the two halves hanging off it
@@ -141,6 +143,51 @@ local function createBar(key, parent)
     addGhost(bar, parent)
     bar:Hide()
     return bar
+end
+
+-- The sleeping bag's question (Rested.lua, ASKING): resting came on with no other sign - a bag, or an inn?
+-- A check keeps the bar, an X drops it. Two small buttons at the bar's right end, shown only while asking.
+local function addRestedAsk(bar)
+    local ask = CreateFrame("Frame", nil, bar)
+    ask:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+    ask:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    ask:SetWidth(1)
+    local function button(texture, onClick)
+        local b = CreateFrame("Button", nil, ask)
+        b:EnableMouse(true)
+        b:RegisterForClicks("LeftButtonUp")
+        b:SetNormalTexture(texture)
+        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        b:SetScript("OnClick", function()
+            ns.SafeCall(onClick)
+            Bars:Update()
+        end)
+        return b
+    end
+    ask.no = button("Interface\\RaidFrame\\ReadyCheck-NotReady", function() ns.Rested:Dismiss() end)
+    ask.yes = button("Interface\\RaidFrame\\ReadyCheck-Ready", function() ns.Rested:Confirm() end)
+    ask.no:SetPoint("RIGHT", bar, "RIGHT", -2, 0)
+    ask.yes:SetPoint("RIGHT", ask.no, "LEFT", -3, 0)
+    ask:Hide()
+    bar.ask = ask
+end
+
+local function showRestedAsk(bar, asking)
+    local ask = bar.ask
+    if ask:IsShown() == asking then
+        return
+    end
+    ask:SetShown(asking)
+    local size = math.max(10, (bar.height or 14) - 2)
+    ask.yes:SetSize(size, size)
+    ask.no:SetSize(size, size)
+    bar.time:ClearAllPoints()
+    if asking then
+        bar.time:SetPoint("RIGHT", ask.yes, "LEFT", -4, 0)
+    else
+        bar.time:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+    end
+    bar.label:SetText(asking and "Sleeping bag?" or Settings.LABELS[bar.key])
 end
 
 -- Spell icon, a real StatusBar (the client can drive one from values an addon is not allowed to
@@ -566,6 +613,10 @@ local function progressFor(key, now, testing)
         return active, fraction, remaining, confidence < 0.4
     elseif key == "PLAINS" then
         return ns.Plains:GetProgress(now)
+    elseif key == "RESTED" then
+        return ns.Rested:GetProgress(now)
+    elseif key == "FED" then
+        return ns.Food:GetProgress(now)
     end
     local active, fraction, remaining, phase, note = Swings:GetPhasedProgress(key, now)
     if phase == "aim" or phase == "windup" then
@@ -580,6 +631,10 @@ end
 local function inUse(key, now)
     if key == "PLAINS" then
         return ns.Plains:InUse()
+    elseif key == "RESTED" then
+        return ns.Rested:InUse(now)
+    elseif key == "FED" then
+        return ns.Food:InUse(now)
     elseif key == "ENEMY" then
         return (Incoming:GetProgress(now)) and true or false
     elseif SOURCES[key] then
@@ -608,6 +663,10 @@ local function applies(key, now)
         return ns.Reactive ~= nil and ns.Reactive:SlotLabel(key) ~= nil
     elseif key == "PLAINS" then
         return ns.Plains ~= nil and ns.Plains:Applies()
+    elseif key == "RESTED" then
+        return ns.Rested ~= nil and ns.Rested:Applies(now)
+    elseif key == "FED" then
+        return ns.Food ~= nil and ns.Food:Applies(now)
     end
     return true
 end
@@ -805,6 +864,9 @@ function Bars:Update()
                 bar:SetShown(visible)
             end
             bar.ghost:SetShown(unlocked and not visible)
+            if bar.ask then
+                showRestedAsk(bar, visible and not testing and ns.Rested:Unsure())
+            end
         end
     end
     self.shownBars = shown
@@ -1004,6 +1066,9 @@ local function create()
     for _, key in ipairs(Settings.KEYS) do
         local parent = Settings.GROUPS[key] == "enemy" and upper or lower
         bars[key] = SOURCES[key] and createTimedBar(key, parent) or createBar(key, parent)
+    end
+    if bars.RESTED then
+        addRestedAsk(bars.RESTED)
     end
 
     Bars:Layout()

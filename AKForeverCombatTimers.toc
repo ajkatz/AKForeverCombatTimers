@@ -19,6 +19,8 @@ Buffs.lua
 Dots.lua
 Reactive.lua
 Plains.lua
+Rested.lua
+Food.lua
 UI\Bars.lua
 UI\Config.lua
 Blizzard.lua

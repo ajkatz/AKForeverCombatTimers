@@ -27,10 +27,10 @@ local BarSettings = {}
 ns.BarSettings = BarSettings
 
 BarSettings.KEYS = { "TCAST", "ENEMY", "MH", "OH", "RG", "BUFF",
-    "DOT1", "DOT2", "DOT3", "DOT4", "REACT1", "REACT2", "REACT3", "PLAINS", "CAST" }
+    "DOT1", "DOT2", "DOT3", "DOT4", "REACT1", "REACT2", "REACT3", "PLAINS", "RESTED", "FED", "CAST" }
 BarSettings.LABELS = {
     TCAST = "Target cast", ENEMY = "Incoming hit", MH = "Main hand", OH = "Off hand", RG = "Ranged",
-    BUFF = "Buff", PLAINS = "Plainsrunning", CAST = "Your cast",
+    BUFF = "Buff", PLAINS = "Plainsrunning", RESTED = "Well Rested", FED = "Well Fed", CAST = "Your cast",
     -- only ever seen on an empty row: an active one wears the spell's own name
     DOT1 = "DoT 1", DOT2 = "DoT 2", DOT3 = "DoT 3", DOT4 = "DoT 4",
     REACT1 = "Reactive 1", REACT2 = "Reactive 2", REACT3 = "Reactive 3",
@@ -44,7 +44,7 @@ BarSettings.GROWS = { "down", "up" }
 BarSettings.GROUPS = { TCAST = "enemy", ENEMY = "enemy", MH = "own", OH = "own", RG = "own", BUFF = "own",
     DOT1 = "own", DOT2 = "own", DOT3 = "own", DOT4 = "own",
     REACT1 = "own", REACT2 = "own", REACT3 = "own",
-    PLAINS = "own", CAST = "own" }
+    PLAINS = "own", RESTED = "own", FED = "own", CAST = "own" }
 
 local BAR_DEFAULTS = { mode = "used", after = 3, width = 220, height = 14 }
 local BAR_OVERRIDES = {
@@ -72,6 +72,8 @@ local ALIASES = {
     cast = "CAST", mycast = "CAST", player = "CAST",
     buff = "BUFF", snd = "BUFF",
     plains = "PLAINS", plainsrunning = "PLAINS", run = "PLAINS", speed = "PLAINS",
+    rested = "RESTED", wellrested = "RESTED", sleep = "RESTED", bag = "RESTED",
+    fed = "FED", food = "FED", wellfed = "FED", eat = "FED",
     dot = "DOT1", dot1 = "DOT1", dot2 = "DOT2", dot3 = "DOT3", dot4 = "DOT4",
     react = "REACT1", react1 = "REACT1", react2 = "REACT2", react3 = "REACT3", reactive = "REACT1",
 }

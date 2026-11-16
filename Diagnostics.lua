@@ -332,6 +332,8 @@ function Diagnostics:Collect()
         errors = sanitize(ns.errors),
         auraProbe = sanitize(Diagnostics.auraProbe),
         plains = sanitize(ns.Plains and ns.Plains:Describe() or "no module"),
+        rested = sanitize(ns.Rested and ns.Rested:Describe() or "no module"),
+        fed = sanitize(ns.Food and ns.Food:Describe() or "no module"),
     }
 
     report.api = {}

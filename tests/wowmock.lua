@@ -370,6 +370,7 @@ function Mock.install(options)
         normalizedRealm = true, -- false: no GetNormalizedRealmName(), only the spaced GetRealmName()
         playerClass = options.class or "WARRIOR",
         playerRace = options.race or "Tauren",
+        playerLevel = options.level or 30,
         speed = 0,
         attackSpeed = { player = { 2.6, nil, nil } }, -- [unit] = { mainHand, offHand, ranged } or Mock.SECRET
         units = {},  -- [token] = { id = "boar", name = "Boar", hostile = true }  (player is implicit)
@@ -537,6 +538,13 @@ function Mock.install(options)
     end
     G.UnitClass = function() return "Player Class", state.playerClass end
     G.UnitRace = function() return state.playerRace, state.playerRace end
+    -- the player's level only (state.playerLevel); nothing for any other unit, as before this was mocked
+    G.UnitLevel = function(unit)
+        if unit == "player" then
+            return state.playerLevel
+        end
+        return nil
+    end
     state.movementSecretInCombat = options.movementSecretInCombat
     G.GetUnitSpeed = function()
         if state.inCombat and state.movementSecretInCombat then
@@ -674,6 +682,9 @@ function Mock.install(options)
     G.C_Spell = {
         GetSpellName = function(spellID) return state.spellNames[spellID] end,
         GetSpellTexture = function(spellID) return 130000 + spellID end,
+        -- [spellID] = text ("" = not loaded yet: RequestLoadSpellData is counted, SPELL_DATA_LOAD_RESULT is the scenario's)
+        GetSpellDescription = function(spellID) return (state.spellDescriptions or {})[spellID] end,
+        RequestLoadSpellData = function(spellID) state.spellRequests = (state.spellRequests or 0) + 1 end,
     }
     -- One creature, one name. A unit the client is protecting has no readable GUID, and then a DoT
     -- on it cannot be filed at all - which the addon treats as "do not guess", not as an error.
@@ -937,12 +948,14 @@ end
 -- The player casts a self buff: UNIT_SPELLCAST_SUCCEEDED (own casts are never secret), then UNIT_AURA.
 -- options: neverSecret, auraFirst (the aura event beats the cast event), secretEvent (UNIT_AURA's payload is secret)
 -- A stacking, duration-less buff - Plainsrunning and its like. `stacks` nil takes it away again.
-function Mock.stackingBuff(spellID, name, stacks)
+-- `expires` gives it an end (Well Rested at 3/3, whose refresh moves it).
+function Mock.stackingBuff(spellID, name, stacks, expires)
     local state = Mock.state
     state.spellNames[spellID] = name
     if stacks then
         state.auras[spellID] = { auraInstanceID = 100 + spellID % 50, spellId = spellID, name = name,
-            duration = 0, expirationTime = 0, applications = stacks, neverSecret = true }
+            duration = expires and 7200 or 0, expirationTime = expires or 0, applications = stacks,
+            neverSecret = true }
     else
         state.auras[spellID] = nil
     end

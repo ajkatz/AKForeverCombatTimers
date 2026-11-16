@@ -81,6 +81,9 @@ faint corner marks on idle rows. Idle rows are click-through either way.
 | `/fct order tcast enemy mh oh rg buff cast` | the whole order at once (each bar stays in its half) |
 | `/fct buff` | what the buff bar tracks: `buff add <spell name>`, `buff remove <spell name>`, `buff reset` (rogues start with Slice and Dice) |
 | `/fct plains` | the Plainsrunning readout: what it sees; `/fct plains <buff name>` if the buff is called otherwise |
+| `/fct food` | the buff food count-up: what the last meal was taken for (buff food or plain) and why, and the foods remembered |
+| `/fct rested` (`probe`: what came and went lately) | the sleeping bag's Well Rested count-up (lying down at 3/3 counts the minute to the refresh): what it sees; `/fct rested <buff name>` if the buff is called otherwise. Off from level 60: the bag's bonus is experience |
+| `/fct bar fed ...` | the Well Fed count-up while you eat buff food (its own row, set like any bar); `/fct diag` -> `fed` says what it read |
 | `/fct reset` | the block back at its default place |
 | `/fct castlog`, `/fct casttime <spell>`, `/fct auras`, `/fct cpu` | for a bug report beside `/fct diag`: the last casts seen, whether a spell casts on this client, the buffs on you with every field, which addon is eating the frame |
 

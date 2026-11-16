@@ -1,5 +1,29 @@
 # AKForeverCombatTimers
 
+## 0.5.6
+
+- **A count-up for buff food.** Eating food that makes you Well Fed, a bar fills over the seconds the food
+  names ("at least 10 seconds eating"; else the time measured the last time, else 10) - "0:07" - and shows
+  "Well Fed" full a moment when the buff lands, or is refreshed if you were Well Fed already. Stop eating
+  first and it goes; plain food gets no bar. Its own row ("Well Fed", `/fct bar fed ...` like any other bar).
+  Which food is buff food: its words (the eating buff's or the item's use spell's) naming Well Fed, or the
+  food having made you well fed before - remembered for all your characters. Food it cannot tell yet gets the
+  count-up as a guess; no Well Fed three seconds past the mark takes the bar away and remembers the food as
+  plain. `/fct food` says what the last meal was taken for and why.
+
+- **`/fct rested probe`** lists what came and went in the last ten minutes - buffs and debuffs, your casts and
+  channels, the resting flag - to find what the game shows before the first Well Rested stack.
+
+- **A count-up for the Cozy Sleeping Bag.** From the moment you lie down ("You feel rested" - your bag or somebody else's), a bar fills
+  over each minute toward the next stack - "0/3  0:41" before the first, then "1/3", "2/3" - and shows 3/3
+  when you have them all. Lying down already at 3/3 counts the minute up too ("3/3  0:41") toward the
+  refresh, which fills the bar - then it lets go; nothing is tracked past that first refresh. When resting comes on with
+  no other sign, the bar asks "Sleeping bag?": the check keeps it, the X drops it, no answer keeps it counting
+  (it goes by itself if no stack comes). Logging in, a hearth, a portal or a flight into a city asks nothing. Get up before the next stack and it goes
+  away. Its own row ("Well Rested"), set like any other bar; `/fct rested` says what it sees. From level 60
+  on all of it is off - no bar, no question, nothing read or kept: the bag's bonus is to experience, and
+  there is none left to earn (the level 60 switch is new, and not yet checked in the game).
+
 ## 0.5.5
 
 - **An interrupt you can see** (new, not yet checked in the game). When somebody stops a cast - your target's,
