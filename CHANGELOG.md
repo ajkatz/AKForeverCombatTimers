@@ -1,5 +1,31 @@
 # AKForeverCombatTimers
 
+## 0.6.0
+
+- **DoT bars: two mobs of one name no longer share their bars.** In a fight the game hides who the target
+  is, and the nameplate lookup the addon leaned on gives nothing for "target" on this client - so the name
+  was all it had, and a swap between two Kobold Miners showed the first one's DoTs on the second. Now
+  every nameplate that comes up is followed, and the target is matched to its plate: by the client saying
+  so; else because it is the only plate of that name; else by the first hit that lands on the target and
+  on one plate in the same instant - until then the bars show what you cast on this target and nothing of
+  another mob's. Needs enemy nameplates on; without them, mobs of one name still share. `/fct diag` records
+  how each swap was placed (`dots.targets`).
+- **Nightfall has a bar, like Overpower.** A warlock's Nightfall proc (Shadow Trance: the next Shadow Bolt
+  is instant) shows on a reactive bar for as long as it is there, and goes when the Shadow Bolt is cast.
+  The buff cannot be read in a fight, so the bar opens when Shadow Bolt's cast time reads zero and counts
+  ten seconds from there; out of a fight the buff's real end and length are read and kept. A warlock has
+  it from the start; `/fct react remove Nightfall` takes it off.
+- **Reactive bars land with a flash and breathe.** Overpower, Revenge, Riposte, Mongoose Bite,
+  Counterattack and Nightfall are press-it-now moments: the bar now lands with a white burst that settles
+  onto it from a quarter larger, and its glow breathes while the window is open - faster in the last three
+  seconds. Only light is added: no row moves or changes size.
+- **The sleeping bag: a step is getting up.** The Well Rested count-up now ends the moment you start to
+  move, instead of waiting for the game's resting flag or the 75 seconds: before the first stack the bar
+  goes; with a stack or two the buff stays and the count-up to the next stack stops, until the next stack
+  lands or you lie down again; the minute toward a refresh at 3/3 is dropped. Walking into an inn or a city
+  no longer asks "Sleeping bag?" - you are moving, so it is no bag. (A step in the first two seconds after
+  lying down is taken for the lying down itself.)
+
 ## 0.5.6
 
 - **A count-up for buff food.** Eating food that makes you Well Fed, a bar fills over the seconds the food

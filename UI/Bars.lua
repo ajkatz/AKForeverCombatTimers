@@ -462,6 +462,78 @@ local function animateInterrupt(bar, state, now)
     drama.settled = t >= math.max(I.flash, I.slam, I.shake)
 end
 
+------------------------------------------------------------------------
+-- A reactive window (Overpower, Riposte, Nightfall ...: a state with `flashy`) is a press-it-now moment, so
+-- its bar does not just appear: it lands with a white burst that settles onto the bar from a quarter
+-- larger, and its glow breathes for as long as the window is open - faster in the last three seconds. One
+-- overlay per bar, made the first time it is needed; it only adds light (nothing is moved or resized, so
+-- the rows around it stay where they are) and it goes the moment the window does.
+------------------------------------------------------------------------
+local PROC = {
+    burst = 0.9,        -- the white burst at its brightest ...
+    flash = 0.3,        -- ... and the seconds it takes to fade
+    pop = 0.3,          -- seconds for the glow to settle onto the bar ...
+    popFrom = 1.25,     -- ... from this size
+    glow = 0.35,        -- the breath at its brightest
+    period = 0.9,       -- seconds per breath
+    hurry = 3,          -- the last seconds of the window ...
+    hurryPeriod = 0.35, -- ... breathe this fast
+}
+
+local function clearProc(bar)
+    local look = bar.proc
+    if look and look.on then
+        look.on, look.scale = false, 1
+        look.glow:SetAlpha(0)
+        look:SetScale(1)
+        look:Hide()
+    end
+end
+
+local function armProc(bar, now)
+    local look = bar.proc
+    if not look then
+        look = CreateFrame("Frame", nil, bar)
+        look:SetFrameLevel((bar.status:GetFrameLevel() or 1) + 1)
+        look.glow = look:CreateTexture(nil, "OVERLAY")
+        look.glow:SetAllPoints(look)
+        look.glow:SetColorTexture(1, 1, 1, 1)
+        look.glow:SetBlendMode("ADD")
+        bar.proc = look
+    end
+    look:ClearAllPoints()
+    look:SetPoint("CENTER", bar.status, "CENTER", 0, 0)
+    look:SetSize(bar.statusWidth or bar.width or 100, bar.height or 14)
+    look.at, look.last, look.phase, look.scale, look.on = now, now, 0, nil, true
+    look:Show()
+end
+
+local function animateProc(bar, state, now)
+    local look = bar.proc
+    if not look or not look.on then
+        return
+    end
+    local P = PROC
+    local t = math.max(0, now - look.at)
+    -- the breath keeps its place when it quickens: the phase is carried, not recomputed
+    local left = type(state.endTime) == "number" and (state.endTime - now) or nil
+    local period = (left and left <= P.hurry) and P.hurryPeriod or P.period
+    look.phase = look.phase + math.max(0, now - look.last) * 2 * math.pi / period
+    look.last = now
+    local burst = t < P.flash and P.burst * (1 - t / P.flash) or 0
+    local breath = P.glow * (0.5 - 0.5 * math.cos(look.phase))
+    look.glow:SetAlpha(math.max(burst, breath))
+    local scale = 1
+    if t < P.pop then
+        local toGo = 1 - t / P.pop
+        scale = 1 + (P.popFrom - 1) * toGo * toGo
+    end
+    if scale ~= look.scale then
+        look.scale = scale
+        look:SetScale(scale)
+    end
+end
+
 -- A new (or pushed back) cast: hand name, icon and - when we may not read them - the times to the
 -- widgets. Name and icon may be secret: they go straight in, inside a pcall, and are never looked at.
 local function armCastBar(bar, cast)
@@ -519,6 +591,7 @@ local function updateTimedBar(bar, now, testing)
         if bar.serial ~= "test" then
             bar.serial = "test"
             clearInterrupt(bar)
+            clearProc(bar)
             releaseCountdown(bar)
             bar.status:SetMinMaxValues(0, 1)
             bar.label:SetText(Settings.LABELS[bar.key])
@@ -537,6 +610,7 @@ local function updateTimedBar(bar, now, testing)
             bar.serial, bar.idleLook = nil, false
             releaseCountdown(bar) -- the client must not keep writing into a bar that is done
             bar.time:SetText("")
+            clearProc(bar) -- the window is shut: no glow on a bar that only lingers
         end
         -- An "always" bar stays up while idle: empty, under its own name. (A "when used" bar keeps showing
         -- what it last showed while it lingers and fades.)
@@ -554,10 +628,18 @@ local function updateTimedBar(bar, now, testing)
         else
             armCastBar(bar, state)
         end
+        if state.flashy and not state.interrupted then
+            armProc(bar, now)
+        else
+            clearProc(bar)
+        end
     end
     if state.interrupted then
         animateInterrupt(bar, state, now)
         return true
+    end
+    if state.flashy then
+        animateProc(bar, state, now)
     end
     if bar.path == "numbers" then
         showFraction(bar, state.owner:GetProgress(state, now))

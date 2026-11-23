@@ -247,11 +247,14 @@ nothing is waited for.
 ## Reactive windows
 
 How long you still have to press **Overpower, Revenge, Mongoose Bite, Counterattack or Riposte** - the
-abilities that only open for a few seconds after a dodge, a parry or a block. One bar each, up to three.
+abilities that only open for a few seconds after a dodge, a parry or a block - and how long a warlock's
+**Nightfall** proc (the instant Shadow Bolt) is still there. One bar each, up to three. They are
+press-it-now moments, so the bar does not just appear: it lands with a white burst and its glow breathes
+for as long as the window is open, faster in the last three seconds.
 
 ```
 /fct react                    what has a bar, and the counts
-/fct react add Revenge        give one a bar (only the five above: it has to know what opens it)
+/fct react add Revenge        give one a bar (only the six above: it has to know what opens it)
 /fct react remove Revenge
 /fct react reset              back to your class's defaults
 ```
@@ -267,6 +270,14 @@ say whose. Alone, it is you. In a group the dodge has to line up with a swing of
 owns the swing timers: `PLAYER_SWING` fires the instant a swing lands, and your melee abilities arrive on
 `UNIT_SPELLCAST_SUCCEEDED`. A target dodge within 0.4s of either is yours; anything else is counted as
 somebody else's in `/fct react` rather than shown. Nothing else in the game is placed to make that call.
+
+**Nightfall is a proc, not a dodge.** It is a buff (Shadow Trance), and buffs cannot be read in a fight -
+but what it does can: while it is up, Shadow Bolt's cast time reads zero. So whenever your auras change
+the addon asks "is Shadow Bolt instant?": yes opens the bar (ten seconds, counted from that moment), no
+closes it, and so does casting the Shadow Bolt. A Shadow Bolt that was already being cast when the proc
+landed does not take it - the bar steps aside for half a second and comes back. Out of a fight the buff
+itself is read: its real end, and its real length for the fights to come. *New and not yet seen in the
+game:* `/fct diag` records what the client said (`reactive.procs`).
 
 ## How it works
 

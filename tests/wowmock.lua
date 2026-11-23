@@ -685,6 +685,18 @@ function Mock.install(options)
         -- [spellID] = text ("" = not loaded yet: RequestLoadSpellData is counted, SPELL_DATA_LOAD_RESULT is the scenario's)
         GetSpellDescription = function(spellID) return (state.spellDescriptions or {})[spellID] end,
         RequestLoadSpellData = function(spellID) state.spellRequests = (state.spellRequests or 0) + 1 end,
+        -- a spell the player knows, by name or id: its cast time as it is right now (state.castTimes[name],
+        -- milliseconds; 0 while a proc makes it instant). Documented without a secrecy flag, so plain in a
+        -- fight; state.castTimeSecret is the client that hides it after all, state.noSpellInfo one without it.
+        GetSpellInfo = (not options.noSpellInfo) and function(identifier)
+            local name = type(identifier) == "number" and state.spellNames[identifier] or identifier
+            local castTime = (state.castTimes or {})[name]
+            if castTime == nil then
+                return nil
+            end
+            state.spellInfoAsked = (state.spellInfoAsked or 0) + 1
+            return { name = name, castTime = state.castTimeSecret and Mock.SECRET or castTime }
+        end or nil,
     }
     -- One creature, one name. A unit the client is protecting has no readable GUID, and then a DoT
     -- on it cannot be filed at all - which the addon treats as "do not guess", not as an error.
@@ -1037,6 +1049,26 @@ function Mock.finisher(spellID, name, options)
     state.auras[spellID] = { auraInstanceID = 100 + spellID % 50, spellId = spellID, name = name, duration = seconds,
         expirationTime = Mock.now + seconds }
     Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-9", spellID)
+    Mock.fireUnit("UNIT_AURA", "player", "player", state.inCombat and Mock.SECRET or { isFullUpdate = false })
+end
+
+-- A proc lands on the player (Nightfall's Shadow Trance): no cast of the player's own, an aura hidden in a
+-- fight like every other - and the spell it frees (Shadow Bolt) reads as instant for as long as it is up.
+function Mock.proc(spellID, name, seconds, frees)
+    local state = Mock.state
+    state.spellNames[spellID] = name
+    state.auras[spellID] = { auraInstanceID = 100 + spellID % 50, spellId = spellID, name = name, duration = seconds,
+        expirationTime = Mock.now + seconds }
+    state.castTimes = state.castTimes or {}
+    state.castTimes[frees] = 0
+    Mock.fireUnit("UNIT_AURA", "player", "player", state.inCombat and Mock.SECRET or { isFullUpdate = false })
+end
+
+-- ... and goes (used, or run out): the spell has its cast time again.
+function Mock.procGone(spellID, frees, castTime)
+    local state = Mock.state
+    state.auras[spellID] = nil
+    state.castTimes[frees] = castTime
     Mock.fireUnit("UNIT_AURA", "player", "player", state.inCombat and Mock.SECRET or { isFullUpdate = false })
 end
 

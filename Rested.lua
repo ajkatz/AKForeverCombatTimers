@@ -54,6 +54,17 @@
 -- on nothing here runs: no bar, no "Sleeping bag?", nothing read, started, kept or logged (Rested:Retired).
 -- The level is the client's (UnitLevel), or the one PLAYER_LEVEL_UP just named - the event comes a moment
 -- before UnitLevel follows - whichever is higher; a level the client will not give leaves everything on.
+--
+-- A STEP IS GETTING UP. The user, 2026-11-18: "for the well rested tracking in fct we only want to track that
+-- if the user is laying down. if the user actively moving/running we know they aren't getting the well rested
+-- buff so its the easiest tell". The client has no call for "lying down", but it says when the feet start to
+-- move (PLAYER_STARTED_MOVING; GetUnitSpeed where it is readable). So a step while a count-up runs ends it at
+-- once instead of waiting for the resting flag or the 75 seconds: at 0/3 the bar goes; with a stack or two the
+-- buff stays and the count-up to the next stack stops, until the next stack lands or you lie down again; the
+-- minute toward a refresh at 3/3 is dropped. And resting that comes on while you are moving - walking into
+-- an inn or a city - is no bag: the bar does not ask. A step in the first two seconds after lying down is
+-- taken for the lying down itself (whether settling onto the bag counts as a step is not measured yet; the
+-- probe logs every step that ends a count-up).
 local _, ns = ...
 
 local Rested = {}
@@ -73,6 +84,7 @@ local MAX_STACKS = 3
 local MINUTE = 60     -- a stack for every minute resting inside
 local GRACE = 15      -- seconds past the minute with no stack: you got up, the count-up stops
 local SHOW_FULL = 5   -- seconds the full bar stays at 3/3 before it lets go
+local SETTLE = 2      -- seconds after lying down in which a step is the lying down itself (A STEP IS GETTING UP)
 local ROW_FOR = 90    -- seconds after the last stack the bar keeps its row
 local COLOR = { 0.45, 0.65, 0.95 }
 local RETIRE_LEVEL = 60 -- from here on the bag's experience bonus is worth nothing (AT 60)
@@ -166,10 +178,10 @@ function Rested:Refresh()
     elseif state.stacks == nil or state.stacks == 0 then
         -- just got it: the first stack, and the first minute toward the next starts now
         state.stacks, state.at, state.counted = aura.stacks or 1, now, aura.stacks == nil
-        state.gains = state.gains + 1
+        state.gains, state.up = state.gains + 1, false
     elseif aura.stacks then
         if aura.stacks > state.stacks then
-            state.at = now
+            state.at, state.up = now, false -- (a stack after a step: back in the bag)
             state.gains = state.gains + 1
         end
         state.stacks, state.counted = aura.stacks, false
@@ -177,7 +189,7 @@ function Rested:Refresh()
         and aura.expires > state.expires then
         -- no count from the client: a refresh (the expiry pushed later) is the next stack
         state.stacks = math.min(MAX_STACKS, state.stacks + 1)
-        state.at, state.counted = now, true
+        state.at, state.counted, state.up = now, true, false
         state.gains = state.gains + 1
     end
     state.expires = aura.expires
@@ -191,6 +203,7 @@ function Rested:Current(now)
     end
     local elapsed = math.max(0, now - state.at)
     local growing = (state.stacks < MAX_STACKS or state.refreshing == true) and elapsed <= MINUTE + GRACE
+        and not state.up -- (a step took you out of the bag: nothing more is coming)
     return state.stacks, elapsed, growing
 end
 
@@ -232,6 +245,7 @@ local function layDown(state, unsure)
         state.stacks, state.expires, state.counted = 0, nil, false
     end
     state.at, state.unsure = GetTime(), unsure == true
+    state.laidAt, state.up = state.at, false
     state.refreshing = state.stacks >= MAX_STACKS
     if ns.cdb then
         ns.cdb.restedLayAt, ns.cdb.restedUnsure = state.at, state.unsure or nil
@@ -242,10 +256,58 @@ end
 
 local function getUp(state)
     state.stacks, state.at, state.expires, state.counted, state.unsure = nil, nil, nil, false, false
-    state.refreshing = false
+    state.refreshing, state.up = false, false
     if ns.cdb then
         ns.cdb.restedLayAt, ns.cdb.restedUnsure, ns.cdb.restedRefresh = nil, nil, nil
     end
+end
+
+-- are the feet moving: the client's own events say (kept in state.moving), and the speed where it is readable
+local function moving()
+    if Rested.state.moving then
+        return true
+    end
+    if type(GetUnitSpeed) == "function" then
+        local ok, speed = pcall(GetUnitSpeed, "player")
+        if ok and not ns.IsSecret(speed) and type(speed) == "number" and speed > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+-- the feet started to move: out of the bag, whatever was counting (A STEP IS GETTING UP)
+function Rested:Stepped()
+    local state = Rested.state
+    state.moving = true
+    if Rested:Retired() or not state.stacks or not state.at then
+        return false
+    end
+    local now = GetTime()
+    if state.laidAt and now - state.laidAt < SETTLE then
+        return false -- settling onto the bag
+    end
+    local was = state.stacks
+    if state.stacks == 0 then
+        getUp(state) -- up before the first stack
+    elseif state.refreshing then
+        state.refreshing, state.at = false, now - ROW_FOR -- up before the refresh: nothing more to count
+        if ns.cdb then
+            ns.cdb.restedRefresh, ns.cdb.restedLayAt = nil, nil
+        end
+    elseif state.stacks < MAX_STACKS and not state.up and now - state.at <= MINUTE + GRACE then
+        state.up = true -- the buff stays; the count-up to the next stack stops
+        if ns.cdb then
+            ns.cdb.restedLayAt = nil
+        end
+    else
+        return false
+    end
+    state.steps = (state.steps or 0) + 1
+    if Rested.Stepped_note then
+        Rested.Stepped_note(was)
+    end
+    return true
 end
 
 -- the bar is asking "Sleeping bag?" (resting came on with no other sign, and no stack yet)
@@ -318,9 +380,11 @@ function Rested:Started(resting)
         layDown(state)
         return true
     end
-    -- no other sign: a bag, or an inn? The bar asks - unless a loading screen or a flight brought you here
+    -- no other sign: a bag, or an inn? The bar asks - unless a loading screen or a flight brought you here,
+    -- or your own feet did (walking into an inn or a city: A STEP IS GETTING UP)
     local onTaxi = type(UnitOnTaxi) == "function" and UnitOnTaxi("player")
-    if state.stacks == nil and now - (state.loadedAt or 0) > LOAD_QUIET and not (onTaxi and not ns.IsSecret(onTaxi)) then
+    if state.stacks == nil and now - (state.loadedAt or 0) > LOAD_QUIET and not (onTaxi and not ns.IsSecret(onTaxi))
+        and not moving() then
         layDown(state, true)
         return true
     end
@@ -372,7 +436,7 @@ function Rested:Describe()
         since = state.at and math.floor((GetTime() - state.at) * 10) / 10 or nil,
         reads = state.reads, gains = state.gains, lastAnswer = state.lastAnswer, started = state.started,
         unsure = state.unsure, refreshing = state.refreshing, refreshes = state.refreshes,
-        retired = Rested:Retired(),
+        retired = Rested:Retired(), steps = state.steps, up = state.up, moving = state.moving,
     }
 end
 
@@ -423,6 +487,14 @@ ns:On("PLAYER_UPDATE_RESTING", function()
     if type(IsResting) == "function" then
         ns.SafeCall(Rested.Started, Rested, IsResting())
     end
+end)
+
+ns:On("PLAYER_STARTED_MOVING", function()
+    ns.SafeCall(Rested.Stepped, Rested)
+end)
+
+ns:On("PLAYER_STOPPED_MOVING", function()
+    Rested.state.moving = false
 end)
 
 ------------------------------------------------------------------------
@@ -557,6 +629,9 @@ ns:OnPlayerUnit("UNIT_SPELLCAST_CHANNEL_START", noteCast("channel start"))
 ns:OnPlayerUnit("UNIT_SPELLCAST_CHANNEL_STOP", noteCast("channel stop"))
 Rested.Heard_note = function(event, text)
     note({ what = "chat " .. event, name = plain(text) })
+end
+Rested.Stepped_note = function(stacks)
+    note({ what = "step", name = "up at " .. tostring(stacks) .. "/" .. MAX_STACKS .. " - the count-up ends" })
 end
 ns:On("PLAYER_UPDATE_RESTING", function()
     local resting = type(IsResting) == "function" and plain(IsResting()) or nil

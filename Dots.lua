@@ -396,7 +396,7 @@ local function keyKind(key)
         return "none"
     elseif string.find(key, "^target#") then
         return "stand-in"
-    elseif string.find(key, "^plate:") then
+    elseif string.find(key, "^plate[:#]") then
         return "plate"
     elseif string.find(key, "^name:") then
         return "name"
@@ -404,21 +404,189 @@ local function keyKind(key)
     return "guid"
 end
 
+-- WHICH NAMEPLATE IS THE TARGET'S. Measured by its effect, 2026-11-21: with enemy nameplates on, two mobs
+-- of one name shared one set of bars in a fight. The docs say why: C_NamePlate.GetNamePlateForUnit takes a
+-- nameplate token ("UnitTokenNamePlate"), so asking it for "target" gives nothing on this client and the
+-- name was all that was left. So the plates are followed by their own events instead: every plate that
+-- comes up gets a number (and, out of a fight, its GUID is written down beside it), and the target is
+-- matched to one of them:
+--   1. the client says so: UnitIsUnit("target", token) - documented "secret when unit comparison is
+--      restricted", so it may refuse in a fight;
+--   2. it is the only plate up with the target's name and level;
+--   3. a hit lands on "target" and on exactly one plate in the same instant (UNIT_COMBAT comes once under
+--      every token that points at the mob, readable in a fight) - until then the target is "this target":
+--      what is cast on it shows, and nothing is borrowed from another mob of its name.
+-- A target none of this can place gets no other mob's bars. /fct diag says which way each swap went.
+local plates = {}           -- [token] = { serial = n, guid = the GUID read as the plate came up, if any }
+local plateSerial, platesKnown = 0, 0
+local targetGuessed = false -- the key came from "the only plate of that name": a hit may still correct it
+local comparison = "never asked"
+local TRACE_MAX = 16
+Dots.targetTrace = {}
+local heard = { at = -1, target = nil, plates = {} } -- the UNIT_COMBAT words of one instant
+
+local function traceTarget(route, same)
+    local trace = Dots.targetTrace
+    trace[#trace + 1] = { route = route, kind = keyKind(targetKey), plates = platesKnown, same = same,
+        fight = (type(InCombatLockdown) == "function" and InCombatLockdown()) and true or nil }
+    while #trace > TRACE_MAX do
+        table.remove(trace, 1)
+    end
+end
+
+local function plateKey(token)
+    local plate = plates[token]
+    return plate and (plate.guid or ("plate#" .. plate.serial)) or nil
+end
+
+local function plateRemoved(token)
+    local plate = (not ns.IsSecret(token)) and plates[token] or nil
+    if not plate then
+        return
+    end
+    forget("plate#" .. plate.serial) -- the mob died or left: the number is never given again
+    plates[token] = nil
+    platesKnown = platesKnown - 1
+end
+
+local function plateAdded(token)
+    if ns.IsSecret(token) or type(token) ~= "string" then
+        return
+    end
+    plateRemoved(token) -- a token handed on without a word of the mob that had it
+    plateSerial = plateSerial + 1
+    plates[token] = { serial = plateSerial, guid = guidOf(token) }
+    platesKnown = platesKnown + 1
+end
+
+-- the plate of the target, how it was found - or nil, why not, and how many plates carry its name
+local function plateOfTarget()
+    local name, level = readable(UnitName, "target"), readable(UnitLevel, "target")
+    local same, sameToken, compared = 0, nil, false
+    for token in pairs(plates) do
+        local ok, is = pcall(UnitIsUnit, "target", token)
+        if ok and ns.IsSecret(is) then
+            comparison = "secret"
+        elseif ok and type(is) == "boolean" then
+            comparison, compared = "plain", true
+            if is then
+                return token, "the client says which plate"
+            end
+        end
+        if type(name) == "string" and readable(UnitName, token) == name and readable(UnitLevel, token) == level then
+            same, sameToken = same + 1, token
+        end
+    end
+    if compared then
+        return nil, "no plate is the target's", same -- the client compared, and it is none of them
+    end
+    if same == 1 then
+        return sameToken, "the only plate of that name", same
+    end
+    return nil, same > 1 and "several plates of that name" or "no plate of that name", same
+end
+
+-- what was filed under one key now belongs under another (a stand-in that was placed): newer casts win
+local function moveBucket(from, to)
+    local spells = applied[from]
+    if not spells then
+        return
+    end
+    if not applied[to] then
+        applied[to], applied[from] = spells, nil
+    else
+        for spell, entry in pairs(spells) do
+            applied[to][spell] = entry
+        end
+        forget(from)
+    end
+end
+
+-- The instant is over: did a hit land on the target and on exactly one plate together? Then that plate is
+-- the target's - if the target was still unplaced, or placed by its name alone.
+local function settleHeard()
+    local action = heard.target
+    if not action then
+        return
+    end
+    heard.target = nil
+    local found, count = nil, 0
+    for token, said in pairs(heard.plates) do
+        if said == action and plates[token] then
+            found, count = token, count + 1
+        end
+    end
+    if count ~= 1 then
+        return
+    end
+    local key = plateKey(found)
+    if key == targetKey then
+        targetGuessed = false -- confirmed
+        return
+    end
+    local unplaced = keyKind(targetKey) == "stand-in"
+    if not unplaced and not targetGuessed then
+        return
+    end
+    if unplaced then
+        moveBucket(targetKey, key)
+    end
+    if landing and landing.key == targetKey then
+        landing.key = key
+    end
+    targetKey, targetGuessed = key, false
+    traceTarget("a hit on the target and on one plate together")
+end
+
+local function hear(unit, action, at)
+    if not targetKey or ns.AnySecret(unit, action) or type(unit) ~= "string" then
+        return
+    end
+    if at ~= heard.at then
+        settleHeard()
+        heard.at, heard.target, heard.plates = at, nil, {}
+    end
+    if unit == "target" then
+        if targetGuessed or keyKind(targetKey) == "stand-in" then
+            heard.target = action
+        end
+    elseif plates[unit] then
+        heard.plates[unit] = action
+    end
+end
+
 local function retarget()
     local guid, weak = guidOf("target"), weakKeyOf("target")
+    local route, same
+    heard.target, targetGuessed = nil, false -- a hit heard before the swap was the last target's
     if guid then
-        targetKey = guid
+        targetKey, route = guid, "its GUID"
         if weak then
             aliases[weak] = guid
         end
     elseif readable(UnitExists, "target") == false then
         targetKey = nil -- no target at all
-    elseif weak then
-        targetKey = aliases[weak] or weak
+    elseif weak and keyKind(weak) == "plate" then
+        targetKey, route = aliases[weak] or weak, "its nameplate frame"
     else
-        standIns = standIns + 1
-        targetKey = "target#" .. standIns
-        Dots.stats.standIns = (Dots.stats.standIns or 0) + 1
+        local token
+        if platesKnown > 0 then
+            token, route, same = plateOfTarget()
+        end
+        if token then
+            targetKey = plateKey(token)
+            targetGuessed = route == "the only plate of that name"
+        elseif platesKnown == 0 and weak then
+            targetKey, route = aliases[weak] or weak, "its name (no nameplates up)"
+        else
+            standIns = standIns + 1
+            targetKey = "target#" .. standIns
+            Dots.stats.standIns = (Dots.stats.standIns or 0) + 1
+            route = route or "nothing to tell it by"
+        end
+    end
+    if targetKey then
+        traceTarget(route, same)
     end
     if retargetsLogged < 12 and targetKey then
         retargetsLogged = retargetsLogged + 1
@@ -589,6 +757,9 @@ function Dots:Get(slot, at)
         return nil
     end
     at = at or now()
+    if heard.target and at > heard.at then
+        settleHeard()
+    end
     syncTarget()
     local guid = targetKey
     if not guid then
@@ -750,6 +921,9 @@ local function keyOfUnit(unit)
     if guid then
         return guid
     end
+    if plates[unit] then
+        return plateKey(unit)
+    end
     local weak = weakKeyOf(unit)
     if weak then
         return aliases[weak] or weak
@@ -836,6 +1010,9 @@ end
 
 local function onUnitCombat(_, unit, action, flagText, amount, school)
     local at = now()
+    if platesKnown > 0 then
+        hear(unit, action, at)
+    end
     local word = { t = at, unit = unit, action = action, flag = flagText, amount = amount, school = school }
     recentWords[#recentWords + 1] = word
     if #recentWords > RECENT_WORDS_MAX then
@@ -867,10 +1044,25 @@ ns:On("PLAYER_TARGET_CHANGED", function()
     end
 end)
 ns:On("PLAYER_ENTERING_WORLD", function()
+    -- plates that were up before this addon was listening (a /reload): the frame carries its token
+    local getPlates = type(C_NamePlate) == "table" and C_NamePlate.GetNamePlates or nil
+    local ok, frames = pcall(getPlates or error)
+    if ok and type(frames) == "table" and not ns.IsSecret(frames) then
+        for _, frame in pairs(frames) do
+            local token = type(frame) == "table" and frame.namePlateUnitToken or nil
+            if not ns.IsSecret(token) and type(token) == "string" and not plates[token] then
+                plateAdded(token)
+            end
+        end
+    end
     retarget()
 end)
 ns:On("NAME_PLATE_UNIT_REMOVED", function(_, token)
     plateGone(token)
+    plateRemoved(token)
+end)
+ns:On("NAME_PLATE_UNIT_ADDED", function(_, token)
+    plateAdded(token)
 end)
 -- UNIT_HEALTH fires when the target dies (the value is secret; the event is not), UNIT_FLAGS too
 ns:On("UNIT_HEALTH", function(_, unit) if unit == "target" then dropIfDead("target") end end)
@@ -898,6 +1090,7 @@ function Dots:Report()
     end
     return { enemies = enemies, timers = timers, learned = learned, learnedNames = learnedNames, observed = observed,
         targetKey = keyKind(targetKey),
+        targets = { plates = platesKnown, comparison = comparison, guessed = targetGuessed or nil, recent = self.targetTrace },
         standIns = self.stats.standIns or 0, skipped = self.stats.skipped or 0,
         dropped = { dead = self.stats.droppedDead, gone = self.stats.droppedGone },
         landing = { landed = self.stats.landed, notLanded = self.stats.notLanded, unknown = self.stats.landingUnknown, pending = landing ~= nil,

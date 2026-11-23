@@ -33,7 +33,7 @@ locked with a button.
   target. Your own casts are never secret, so these count real seconds in a fight - the length by rank where ranks
   differ (Corruption, Rend) - and a readable aura corrects them. A DoT lands on the target it was begun on, a mob that
   dies loses its bars at once.
-- **Reactive windows** (`/fct react`) - Overpower, Revenge, Mongoose Bite, Counterattack, Riposte: the five seconds
+- **Reactive windows** (`/fct react`) - a warlock's Nightfall proc, and Overpower, Revenge, Mongoose Bite, Counterattack, Riposte: the five seconds
   after a dodge, parry or block.
 - **The Plainsrunning ramp** for tauren: gaining and losing on two separate clocks (`/fct plains`).
 

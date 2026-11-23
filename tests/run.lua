@@ -2387,6 +2387,165 @@ scenario("in a fight a target is known by its nameplate, or by its name: switch 
     equal(#Mock.errors, 0)
 end)
 
+-- Target swaps. The user, 2026-11-21: "it doesn't do a great job of reading the dots on the current target
+-- and switching the bars on warlock target swaps" - asked what he sees: the wrong mob's bars (two mobs of one
+-- name sharing one set), with enemy nameplates always on. The client's nameplate lookup takes nameplate
+-- tokens only (docs: UnitTokenNamePlate), so "the target's plate frame" is nothing there - which left the
+-- name. Now every plate that comes up is numbered, and the target is matched to one of them.
+local function swapWorld(options)
+    local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
+    local world = { ns = ns, state = state }
+    function world.plate(token, id, name, guid)
+        state.units[token] = { id = id, name = name, hostile = true }
+        state.guids[token] = guid
+        Mock.fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    function world.plateGone(token)
+        Mock.fire("NAME_PLATE_UNIT_REMOVED", token)
+        state.units[token], state.guids[token] = nil, nil
+    end
+    function world.target(id, name, guid)
+        state.units.target = { id = id, name = name, hostile = true }
+        state.guids.target = guid or ("Creature-0-0-0-0-6-" .. id)
+        Mock.fire("PLAYER_TARGET_CHANGED")
+    end
+    -- a hit lands on the target: the client says so under every token that points at the mob
+    function world.hit(...)
+        Mock.fire("UNIT_COMBAT", "target", "WOUND", "", 5, 32)
+        for _, token in ipairs({ ... }) do
+            Mock.fire("UNIT_COMBAT", token, "WOUND", "", 5, 32)
+        end
+        Mock.advance(0.1)
+    end
+    function world.cast(spellID, castGUID)
+        Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", castGUID, spellID)
+    end
+    function world.last()
+        local recent = ns.Dots:Report().targets.recent
+        return recent[#recent]
+    end
+    return world
+end
+
+scenario("two mobs of one name in a fight have their own bars: the target is matched to its nameplate, and a swap shows that mob's DoTs and no other's", function()
+    local w = swapWorld()
+    local ns, state = w.ns, w.state
+    Mock.setCombat(true)
+    state.secretGUIDs = true
+    w.plate("nameplate1", "A", "Kobold Miner")
+    w.plate("nameplate2", "B", "Kobold Miner")
+    w.target("A", "Kobold Miner")
+    equal(ns.Dots:Report().targetKey, "plate")
+    equal(w.last().route, "the client says which plate")
+    w.cast(172, "Cast-A1")
+    check(ns.Dots:Get(1, Mock.now), "Corruption on the first")
+    -- the other Kobold Miner: not the first one's Corruption
+    w.target("B", "Kobold Miner")
+    equal(ns.Dots:Get(1, Mock.now), nil, "another mob of the same name: its own, empty, bars")
+    w.cast(348, "Cast-B1")
+    check(ns.Dots:Get(2, Mock.now), "its Immolate")
+    -- and back: the first one's Corruption, not the second one's Immolate
+    w.target("A", "Kobold Miner")
+    check(ns.Dots:Get(1, Mock.now), "back on the first: its Corruption")
+    equal(ns.Dots:Get(2, Mock.now), nil, "and not the other one's Immolate")
+    equal(ns.Dots:Report().standIns, 0, "nothing was guessed at")
+    equal(ns.Dots:Report().targets.comparison, "plain")
+    equal(ns.Dots:Report().targets.plates, 2)
+    -- the second mob's plate goes and another mob takes the token: a new mob, no bars of the old one
+    equal(ns.Dots:Report().timers, 2, "a Corruption on one, an Immolate on the other")
+    w.plateGone("nameplate2")
+    equal(ns.Dots:Report().timers, 1, "the plate went (the mob died or left): its bars with it")
+    equal(ns.Dots:Report().targets.plates, 1)
+    w.plate("nameplate2", "C", "Kobold Miner")
+    equal(ns.Dots:Report().targets.plates, 2)
+    w.target("C", "Kobold Miner")
+    equal(ns.Dots:Get(2, Mock.now), nil, "the token went to another mob: not the dead one's Immolate")
+    -- a target with no plate of its own (behind you) is none of the plates: nothing shown, nothing borrowed
+    w.target("D", "Kobold Miner")
+    equal(ns.Dots:Report().targetKey, "stand-in")
+    equal(w.last().route, "no plate is the target's")
+    equal(ns.Dots:Get(1, Mock.now), nil)
+    equal(#Mock.errors, 0)
+end)
+
+scenario("the DoT of the pull follows into the fight: the plate was up before it, and what it stood for was written down then", function()
+    local w = swapWorld()
+    local ns, state = w.ns, w.state
+    w.plate("nameplate1", "A", "Kobold Miner", "Creature-0-0-0-0-6-A")
+    w.plate("nameplate2", "B", "Kobold Miner", "Creature-0-0-0-0-6-B")
+    w.target("A", "Kobold Miner")
+    equal(ns.Dots:Report().targetKey, "guid")
+    w.cast(172, "Cast-A1")
+    Mock.setCombat(true)
+    state.secretGUIDs = true
+    w.target("B", "Kobold Miner")
+    equal(ns.Dots:Get(1, Mock.now), nil)
+    w.target("A", "Kobold Miner")
+    check(ns.Dots:Get(1, Mock.now), "the Corruption of the pull, found through the plate")
+    equal(ns.Dots:Report().targetKey, "guid", "the plate stands for the GUID it had before the fight")
+end)
+
+scenario("a client that will not say which plate is the target's: a mob alone of its name is known at once; among several of one name nothing is borrowed, and the first hit that lands on the target and one plate together says which it is", function()
+    local w = swapWorld()
+    local ns, state = w.ns, w.state
+    Mock.setCombat(true)
+    state.secretGUIDs = true
+    state.identitySecret = true -- UnitIsUnit: "secret when unit comparison is restricted"
+    w.plate("nameplate1", "A", "Kobold Miner")
+    w.plate("nameplate2", "B", "Kobold Miner")
+    w.plate("nameplate3", "G", "Kobold Geomancer")
+    -- alone of its name: its plate, at once
+    w.target("G", "Kobold Geomancer")
+    equal(ns.Dots:Report().targetKey, "plate")
+    equal(w.last().route, "the only plate of that name")
+    equal(ns.Dots:Report().targets.comparison, "secret")
+    -- one of two Kobold Miners: which is not known yet - what is cast shows, under "this target"
+    w.target("A", "Kobold Miner")
+    equal(ns.Dots:Report().targetKey, "stand-in")
+    equal(w.last().route, "several plates of that name"); equal(w.last().same, 2)
+    w.cast(172, "Cast-A1")
+    check(ns.Dots:Get(1, Mock.now), "shown while this target is the target")
+    -- a hit lands on the target, and on nameplate1 in the same instant: that is its plate, bars and all
+    w.hit("nameplate1")
+    check(ns.Dots:Get(1, Mock.now), "the Corruption stays")
+    equal(ns.Dots:Report().targetKey, "plate")
+    equal(w.last().route, "a hit on the target and on one plate together")
+    -- the other Miner: nothing borrowed from the first
+    w.target("B", "Kobold Miner")
+    equal(ns.Dots:Get(1, Mock.now), nil, "not the first one's Corruption")
+    w.cast(348, "Cast-B1")
+    w.hit("nameplate2")
+    check(ns.Dots:Get(2, Mock.now), "its Immolate")
+    -- back on the first: empty until its next tick says who it is - then its Corruption is there again
+    w.target("A", "Kobold Miner")
+    equal(ns.Dots:Get(1, Mock.now), nil, "not known yet: nothing rather than the wrong mob's")
+    equal(ns.Dots:Get(2, Mock.now), nil)
+    w.hit("nameplate1")
+    check(ns.Dots:Get(1, Mock.now), "the tick named it: its Corruption is back")
+    equal(ns.Dots:Get(2, Mock.now), nil, "and not the other one's Immolate")
+    -- two plates hit in the same instant as the target say nothing
+    w.target("B", "Kobold Miner")
+    w.hit("nameplate1", "nameplate2")
+    equal(ns.Dots:Get(2, Mock.now), nil)
+    equal(ns.Dots:Get(1, Mock.now), nil)
+    equal(ns.Dots:Report().targetKey, "stand-in", "it could be either")
+    -- a hit heard before a swap is not held against the new target
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "", 5, 32)
+    Mock.fire("UNIT_COMBAT", "nameplate2", "WOUND", "", 5, 32)
+    w.target("A", "Kobold Miner")
+    Mock.advance(0.1)
+    equal(ns.Dots:Get(2, Mock.now), nil, "the hit was the last target's")
+    equal(ns.Dots:Report().targetKey, "stand-in")
+    -- the target is hit while another plate dodges in the same instant: only the plate that was hit counts
+    Mock.fire("UNIT_COMBAT", "target", "WOUND", "", 5, 32)
+    Mock.fire("UNIT_COMBAT", "nameplate2", "DODGE", "", 0, 1)
+    Mock.fire("UNIT_COMBAT", "nameplate1", "WOUND", "", 5, 32)
+    Mock.advance(0.1)
+    check(ns.Dots:Get(1, Mock.now), "placed by the hit: the first Miner's Corruption")
+    equal(ns.Dots:Get(2, Mock.now), nil)
+    equal(#Mock.errors, 0)
+end)
+
 scenario("a DoT with a cast time lands on the target it was begun on: switching targets before it finishes files it under the old one", function()
     local ns, state = start({ class = "WARLOCK", spellNames = { [172] = "Corruption", [348] = "Immolate" } })
     state.units.target = { id = "kobold", name = "Kobold", hostile = true }
@@ -2632,6 +2791,218 @@ scenario("Revenge opens on a block, a dodge or a parry - anything you turned asi
         Mock.advance(6)
     end
     equal(ns.Reactive.stats.opened, 3)
+end)
+
+-- Nightfall. The user, 2026-11-20: "FCT needs to show nightfall procs like it does for overpower". The proc
+-- is a buff (Shadow Trance) and buffs are hidden in a fight - but what it does is not: Shadow Bolt's cast
+-- time reads 0 while it is up (C_Spell.GetSpellInfo, documented without a secrecy flag).
+local SHADOW_TRANCE, SHADOW_BOLT = 17941, 686
+local function warlock(options)
+    options = options or {}
+    options.class = "WARLOCK"
+    options.spellNames = { [SHADOW_BOLT] = "Shadow Bolt" }
+    return start(options, function(s) s.castTimes = { ["Shadow Bolt"] = 2500 } end)
+end
+
+scenario("Nightfall: Shadow Bolt goes instant in a fight - a ten second window opens, and closes when the Shadow Bolt is cast", function()
+    local ns, state = warlock()
+    equal(ns.Reactive:SlotLabel("REACT1"), "Nightfall", "a warlock starts with it")
+    Mock.setCombat(true)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "no proc: no bar")
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "open")
+    equal(window.name, "Nightfall"); equal(window.total, 10)
+    equal(window.why, "Shadow Bolt went instant")
+    equal(window.texture, 130000 + SHADOW_TRANCE, "the proc's own icon")
+    equal(window.timesReadable, true); equal(window.drains, true)
+    local _, remaining = ns.Reactive:GetProgress(window, Mock.now + 3)
+    equal(remaining, 7)
+    -- more aura events while it is up do not start it again
+    Mock.advance(3)
+    Mock.fireUnit("UNIT_AURA", "player", "player", Mock.SECRET)
+    equal(ns.Reactive:Get(1, Mock.now).endTime, window.endTime, "the window keeps its end")
+    equal(ns.Reactive.stats.opened, 1)
+    -- the Shadow Bolt goes off: gone from the bar at once, and the buff follows
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", SHADOW_BOLT)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "used")
+    equal(ns.Reactive.stats.closedByUse, 1)
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    Mock.advance(1)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "and it stays gone")
+    equal(ns.Reactive.stats.procGone, 0, "used is not fallen off")
+    -- the next proc is a new window
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    check(ns.Reactive:Get(1, Mock.now), "a second proc")
+    equal(ns.Reactive.stats.opened, 2)
+    equal(ns.Reactive:Report().procs.nightfall.castTime, 0, "what the client last said, for /fct diag")
+end)
+
+scenario("Nightfall nobody used runs out; one that falls off early goes with it; a Shadow Bolt that did not take it brings the bar back", function()
+    local ns = warlock()
+    Mock.setCombat(true)
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    Mock.advance(10.5)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+    equal(ns.Reactive.stats.expired, 1)
+    -- the buff is still said to be up after our ten seconds (a longer one on Forever?): nothing reopens
+    -- by itself from the same proc ... until the client says it went and came again
+    Mock.fireUnit("UNIT_AURA", "player", "player", Mock.SECRET)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "our clock ended it: the same proc does not start over")
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    check(ns.Reactive:Get(1, Mock.now), "open again")
+    -- it falls off early (dispelled, or the client's length is shorter than ours): Shadow Bolt has a cast
+    -- time again, and the bar goes
+    Mock.advance(4)
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "no instant Shadow Bolt: no bar")
+    equal(ns.Reactive.stats.procGone, 1)
+    equal(ns.Reactive.stats.closedByUse, 0)
+    -- a Shadow Bolt already being cast when the proc landed goes off and the proc is still there: the bar
+    -- steps aside for the cast and comes back with the end it had
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    local ends = ns.Reactive:Get(1, Mock.now).endTime
+    Mock.advance(1)
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-2", SHADOW_BOLT)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "taken for used")
+    Mock.fireUnit("UNIT_AURA", "player", "player", Mock.SECRET)
+    equal(ns.Reactive:Get(1, Mock.now), nil, "too soon to say it was not")
+    Mock.advance(0.6)
+    local back = ns.Reactive:Get(1, Mock.now)
+    check(back, "still instant after the cast settled: the proc is still yours")
+    equal(back.endTime, ends, "with the end it had")
+    equal(ns.Reactive.stats.opened, 3, "not a new window")
+    equal(ns.Reactive.stats.closedByUse, 0, "and not a use after all")
+    -- and one that was used, with no word from the client afterwards, does not come back
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-3", SHADOW_BOLT)
+    Mock.state.auras[SHADOW_TRANCE] = nil
+    Mock.state.castTimes["Shadow Bolt"] = 2500
+    Mock.advance(0.6)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+end)
+
+scenario("Nightfall out of a fight: the buff itself is read - its real end, and its real length for the next fight", function()
+    local ns = warlock()
+    -- eight seconds here, were Forever to have changed it
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 8, "Shadow Bolt")
+    local window = ns.Reactive:Get(1, Mock.now)
+    check(window, "open")
+    equal(window.why, "the buff, read"); equal(window.total, 8); equal(window.endTime, Mock.now + 8)
+    equal(ns.cdb.procSeconds.nightfall, 8, "learned")
+    -- read again half way: the same window
+    Mock.advance(3)
+    Mock.fireUnit("UNIT_AURA", "player", "player", { isFullUpdate = false })
+    equal(ns.Reactive:Get(1, Mock.now).endTime, window.endTime); equal(ns.Reactive.stats.opened, 1)
+    -- gone, out of a fight: the aura list says so
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+    -- the next fight's window is the length that was read
+    Mock.setCombat(true)
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 8, "Shadow Bolt")
+    equal(ns.Reactive:Get(1, Mock.now).total, 8)
+    equal(ns.Reactive:Get(1, Mock.now).why, "Shadow Bolt went instant")
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    -- a proc only noticed two seconds in (the client said nothing until then) counts its eight from there
+    -- - and when the fight ends with it up, the real end takes over
+    Mock.state.castTimeSecret = true
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 8, "Shadow Bolt")
+    Mock.advance(2)
+    Mock.state.castTimeSecret = false
+    Mock.fireUnit("UNIT_AURA", "player", "player", Mock.SECRET)
+    equal(ns.Reactive:Get(1, Mock.now).endTime, Mock.now + 8, "counted from when it was seen")
+    Mock.advance(2)
+    Mock.setCombat(false)
+    equal(ns.Reactive:Get(1, Mock.now).why, "the buff, read")
+    equal(ns.Reactive:Get(1, Mock.now).endTime, Mock.now + 4, "the buff's own end")
+    equal(ns.Reactive:Get(1, Mock.now).total, 8)
+end)
+
+scenario("Nightfall on a client that hides the cast time, or has no such call: no bar and no error; other classes ask nothing", function()
+    local ns, state = warlock()
+    Mock.setCombat(true)
+    state.castTimeSecret = true
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    equal(ns.Reactive:Get(1, Mock.now), nil, "nothing readable: nothing claimed")
+    equal(ns.Reactive:Report().procs.nightfall.castTime, "secret")
+    ns = warlock({ noSpellInfo = true })
+    Mock.setCombat(true)
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    equal(ns.Reactive:Get(1, Mock.now), nil)
+    equal(ns.Reactive:Report().procs.nightfall.castTime, "no such call")
+    -- a warrior's buffs come and go without a question about Shadow Bolt
+    ns, state = start({ class = "WARRIOR" }, function(s) s.castTimes = { ["Shadow Bolt"] = 2500 } end)
+    Mock.setCombat(true)
+    Mock.fireUnit("UNIT_AURA", "player", "player", Mock.SECRET)
+    equal(state.spellInfoAsked or 0, 0)
+    -- ... unless it asks for the bar: any class may
+    SlashCmdList.AKFOREVERCOMBATTIMERS("react add Nightfall")
+    equal(ns.Reactive:SlotLabel("REACT3"), "Nightfall")
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    check(ns.Reactive:Get(3, Mock.now), "open")
+end)
+
+scenario("a reactive window is a press-it-now moment: its bar lands with a white burst from a quarter larger, and its glow breathes while the window is open - faster in the last three seconds; every reactive bar, and no other", function()
+    -- the user, 2026-11-21, of the Nightfall bar: "i like how that is working but could be a bit more flashy" -
+    -- asked how: a flash when it lands and a pulse while it is up, on every reactive bar
+    local ns = warlock()
+    Mock.setCombat(true)
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    ns.Bars:Update()
+    local bar = ns.Bars.bars.REACT1
+    local look = bar.proc
+    check(look and look:IsShown(), "the look is on")
+    near(look.glow:GetAlpha(), 0.9, 0.001, "the burst at its brightest")
+    near(look:GetScale(), 1.25, 0.001, "landing from a quarter larger")
+    equal(look.glow.__blend or "ADD", "ADD", "light added over the bar, nothing covered")
+    run(ns, 0.15)
+    check(look:GetScale() > 1.01 and look:GetScale() < 1.24, "settling: " .. look:GetScale())
+    run(ns, 0.2)
+    equal(look:GetScale(), 1, "landed")
+    check(look.glow:GetAlpha() <= 0.35 + 1e-9, "the burst is over: only the breath is left")
+    -- the breath: up to about a third of the burst and back down to nothing, a little under once a second
+    local function breaths(seconds)
+        local count, high, low, above, elapsed = 0, 0, 1, true, 0
+        while elapsed < seconds - 1e-9 do
+            run(ns, 0.05)
+            elapsed = elapsed + 0.05
+            local alpha = look.glow:GetAlpha()
+            high, low = math.max(high, alpha), math.min(low, alpha)
+            if alpha > 0.2 and not above then
+                count = count + 1
+            end
+            above = alpha > 0.2
+        end
+        return count, high, low
+    end
+    local slow, high, low = breaths(3.6)
+    near(high, 0.35, 0.02, "the breath's brightest"); near(low, 0, 0.02, "and its dimmest")
+    equal(slow, 4, "four breaths in 3.6 seconds")
+    -- the last three seconds hurry
+    run(ns, 3.05)
+    local fast = breaths(2.8)
+    equal(fast, 8, "eight breaths in 2.8 seconds")
+    -- used: the look goes with the window, though the bar lingers
+    Mock.fireUnit("UNIT_SPELLCAST_SUCCEEDED", "player", "player", "Cast-1", SHADOW_BOLT)
+    Mock.procGone(SHADOW_TRANCE, "Shadow Bolt", 2500)
+    ns.Bars:Update()
+    equal(look.glow:GetAlpha(), 0); equal(look:GetScale(), 1)
+    check(not look:IsShown(), "off")
+    -- the next one lands with its burst again
+    Mock.proc(SHADOW_TRANCE, "Shadow Trance", 10, "Shadow Bolt")
+    ns.Bars:Update()
+    check(look:IsShown(), "on again")
+    near(look.glow:GetAlpha(), 0.9, 0.001)
+    near(look:GetScale(), 1.25, 0.001)
+    -- a cast bar of your own has no such look
+    Mock.cast("player", { name = "Shadow Bolt", seconds = 3 })
+    ns.Bars:Update()
+    equal(ns.Bars.bars.CAST.proc, nil)
+    -- a rogue's Riposte lands the same way
+    ns = start({ class = "ROGUE", spellNames = { [RIPOSTE] = "Riposte" } })
+    Mock.hit("player", "PARRY")
+    ns.Bars:Update()
+    near(ns.Bars.bars.REACT1.proc.glow:GetAlpha(), 0.9, 0.001, "Riposte too")
 end)
 
 scenario("Overpower, alone in the world: any dodge by the target is yours", function()
@@ -3329,6 +3700,119 @@ local function fedBar(ns)
     ns.Bars:Update(); Mock.advance(0.2); ns.Bars:Update()
     return ns.Bars.bars.FED
 end
+
+scenario("Well-Rested: a step is getting up (the user, 2026-11-18: \"if the user actively moving/running we know they aren't getting the well rested buff so its the easiest tell\") - at 0/3 the bar goes at once; at 1/3 the count-up stops, and the next stack or lying down again starts it; lying down at 3/3 for the refresh is dropped", function()
+    local ns = start()
+    lieDown(ns)
+    local bar = restedBar(ns)
+    check(bar and bar.active, "lying down: counting")
+    Mock.advance(20)
+    Mock.setSpeed(7)
+    check(not ns.Rested:Applies(), "a step at 0/3: up, no bar")
+    equal(ns.cdb.restedLayAt, nil, "and a reload picks nothing up")
+    Mock.setSpeed(0)
+    Mock.advance(5)
+    check(not ns.Rested:Applies(), "standing still again is not lying down")
+    -- with a stack: the buff stays, the count-up to the next stack stops
+    lieDown(ns)
+    Mock.advance(60)
+    Mock.stackingBuff(WELL_RESTED, "Well-Rested", 1)
+    ns.Bars:Update()
+    equal(bar.time:GetText(), "1/3  0:00")
+    Mock.advance(20)
+    check(ns.Rested:InUse(), "lying there at 1/3: counting")
+    Mock.setSpeed(7)
+    equal(ns.Rested:InUse(), false, "a step at 1/3: nothing more is coming")
+    equal(ns.Rested.state.stacks, 1, "the buff is still yours")
+    equal(ns.cdb.restedLayAt, nil)
+    Mock.setSpeed(0)
+    Mock.advance(5)
+    equal(ns.Rested:InUse(), false, "standing still again is not lying down")
+    -- back in the bag: the next stack counts again; so does lying down again
+    Mock.stackingBuff(WELL_RESTED, "Well-Rested", 2)
+    equal(ns.Rested:InUse(), true, "a new stack: you are in the bag")
+    Mock.advance(10)
+    Mock.setSpeed(7); Mock.setSpeed(0)
+    equal(ns.Rested:InUse(), false)
+    Mock.fire("CHAT_MSG_SYSTEM", "You feel rested.")
+    ns.Bars:Update()
+    equal(ns.Rested:InUse(), true, "lying down again")
+    equal(bar.time:GetText(), "2/3  0:00", "the minute starts over")
+    -- at 3/3, lying down for the refresh: a step drops it
+    Mock.advance(60)
+    Mock.stackingBuff(WELL_RESTED, "Well-Rested", 3, 6000)
+    Mock.advance(200)
+    Mock.fire("CHAT_MSG_SYSTEM", "You feel rested.")
+    Mock.advance(10)
+    check(ns.Rested:InUse() and ns.Rested.state.refreshing, "counting to the refresh")
+    Mock.setSpeed(7)
+    equal(ns.Rested:InUse(), false, "up before the refresh")
+    check(not ns.Rested.state.refreshing)
+    check(not ns.Rested:Applies(), "and no row")
+    equal(ns.Rested:Describe().steps, 4, "every step that ended a count-up is counted for the report")
+    -- a step with nothing counting is nothing
+    Mock.setSpeed(0); Mock.setSpeed(7)
+    equal(ns.Rested:Describe().steps, 4)
+    equal(#Mock.errors, 0)
+end)
+
+scenario("Well-Rested: resting that comes on while you are moving - walking into an inn or a city - asks nothing; standing still it still asks, and walking on answers it", function()
+    local ns = start()
+    Mock.advance(10) -- (well after the loading screen)
+    Mock.setSpeed(7)
+    rest(true)
+    check(not ns.Rested:Applies(), "walking in: no bar, no question")
+    equal(ns.Rested.state.stacks, nil)
+    rest(false)
+    Mock.setSpeed(0)
+    Mock.advance(10)
+    rest(true)
+    local bar = restedBar(ns)
+    check(bar and bar.active, "standing still: the bar asks")
+    equal(bar.label:GetText(), "Sleeping bag?")
+    Mock.advance(5)
+    Mock.setSpeed(7)
+    check(not ns.Rested:Applies(), "a step answers the question: no")
+    -- the feet are heard as well as read: the speed unreadable, the client's own event still says moving
+    Mock.setSpeed(0)
+    rest(false)
+    Mock.advance(10)
+    Mock.fire("PLAYER_STARTED_MOVING")
+    rest(true)
+    check(not ns.Rested:Applies(), "moving by the event alone")
+    Mock.fire("PLAYER_STOPPED_MOVING")
+    rest(false)
+    Mock.advance(10)
+    rest(true)
+    check(ns.Rested:Applies(), "stopped again: it asks")
+    -- and read as well as heard: already running when the addon loaded (no event came), the speed says so
+    ns.Rested:Dismiss()
+    rest(false)
+    Mock.advance(10)
+    Mock.state.speed = 7
+    rest(true)
+    check(not ns.Rested:Applies(), "moving by the speed alone")
+    equal(#Mock.errors, 0)
+end)
+
+scenario("Well-Rested: a step in the two seconds after lying down is the lying down itself (whether settling onto the bag counts as a step is not measured in the game)", function()
+    local ns = start()
+    lieDown(ns)
+    Mock.advance(1)
+    Mock.setSpeed(7); Mock.setSpeed(0)
+    local bar = restedBar(ns)
+    check(bar and bar.active, "still lying there")
+    Mock.advance(2)
+    Mock.setSpeed(7)
+    check(not ns.Rested:Applies(), "a step after that is getting up")
+    -- the probe keeps the step, for the saved report
+    local seen = false
+    for _, entry in ipairs(ns.cdb.restedProbe or {}) do
+        if entry.what == "step" then seen = true end
+    end
+    check(seen, "the step that ended the count-up is in the probe's log")
+    equal(#Mock.errors, 0)
+end)
 
 scenario("Well Fed (buff food): eating counts up toward Well Fed - '0:07' of the 10 seconds the food names - then full 'Well Fed' a moment, and it lets go", function()
     local ns, state = start()
